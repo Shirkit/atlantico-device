@@ -4,7 +4,7 @@ Esse arquivo contém só o código para carregar um modelo de forma fixa no devi
 
 #define NumberOf(arg) ((unsigned int)(sizeof(arg) / sizeof(arg[0]))) // calculates the number of layers (in this case 4)
 
-#define _1_OPTIMIZE 0B00000001 // Highly-Recommended Optimization For RAM
+#define _1_OPTIMIZE 0B00000001 // USE_64_BIT_DOUBLE
 #define _2_OPTIMIZE 0B00100000 // MULTIPLE_BIASES_PER_LAYER 
 
 
