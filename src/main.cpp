@@ -7,104 +7,97 @@
 #define ReLU                  // 0
 #define Softmax               // 1
 
-#include <NeuralNetwork.h>
-#include "SPIFFS.h"
+//#include <NeuralNetwork.h>
+//#include <SPIFFS.h>
+#include "ModelUtil.cpp"
 
 unsigned int layers[] = {20, 16, 8, 6}; // 4 layers (1st)layer with 3 input neurons (2nd & 3rd)layer 9 hidden neurons each and (4th)layer with 1 output neuron
 byte Actv_Functions[] = {0, 0, 1};      // 0 = ReLU, 1 = Softmax
 double *output; // 4th layer's output
 
-void printArray(double arr[])
-{
-  Serial.print("Array: [");
-  for (int i = 0; i < NumberOf(arr); i++)
-  {
-    Serial.print(arr[i]);
-    Serial.print(", ");
-  }
-  Serial.println("]");
-}
-
 void setup()
 {
-  NeuralNetwork NN(layers, NumberOf(layers), Actv_Functions); // Creating a NeuralNetwork with pretrained Weights and Biases
-
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("Starting...");
-  delay(1000);
-  if (!SPIFFS.begin(true))
-  {
-    Serial.println("An Error has occurred while mounting SPIFFS");
-    return;
-  }
+  bootUp(layers, NumberOf(layers), Actv_Functions);
 
-  File file = SPIFFS.open("/x_train_esp32.csv", "r");
-  if (!file)
-  {
-    Serial.println("Failed to open file for reading");
-    return;
-  }
+  // trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
 
-  File yfile = SPIFFS.open("/y_train_esp32.csv", "r");
-  if (!yfile)
-  {
-    Serial.println("Failed to open file for reading");
-    return;
-  }
-
-  Serial.println("Reading from file:");
-  char str[1024];
-  char *values;
-  double val;
-  double x[layers[0]], y[layers[0]];
-  while (file.available() && yfile.available())
-  {
-    size_t bytes_read = file.readBytesUntil('\n', str, 1023);
-    str[bytes_read] = '\0';
-
-    values = strtok(str, ",");
-    int j = 0;
-    while (values != NULL)
-    {
-      val = strtod(values, NULL);
-      x[j % layers[0]] = val;
-      j++;
-      if (j % layers[0] == 0)
-        j = 0;
-      values = strtok(NULL, ",");
-    }
-
-    bytes_read = yfile.readBytesUntil('\n', str, 1023);
-    str[bytes_read] = '\0';
-
-    values = strtok(str, ",");
-    j = 0;
-    while (values != NULL)
-    {
-      val = strtod(values, NULL);
-      y[j % layers[0]] = val;
-      j++;
-      if (j % layers[0] == 0)
-        j = 0;
-      values = strtok(NULL, ",");
-    }
-
-    //printArray(x);
-    printArray(y);
-
-    NN.FeedForward(x);
-    NN.BackProp(y);
-    NN.getMeanSqrdError(1);
-
-    // printArray(x);
-  }
-  file.close();
-  Serial.println("Done");
-
-  NN.print();
+  // saveModelToFlash(*currentModel, MODEL_PATH);
+  Serial.println("Choose an option to coninue:");
+  Serial.println("1. Print Model");
+  Serial.println("2. Train Model");
+  Serial.println("3. Save Model");
+  Serial.println("4. Load Model");
+  Serial.println("5. Print New Model");
+  Serial.println("6. Train New Model");
+  Serial.println("7. Save New Model");
+  Serial.println("8. Load New Model");
+  Serial.println("9. Send Current Model to Network");
 }
 
 void loop()
 {
+
+  if (Serial.available() != 0)
+  {
+    int option = Serial.parseInt();
+  
+    switch (option)
+    {
+    case 1:
+      currentModel->print();
+      break;
+    case 2:
+      trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+      break;
+    case 3:
+      saveModelToFlash(*currentModel, MODEL_PATH);
+      break;
+    case 4:
+      currentModel = loadModelFromFlash(MODEL_PATH);
+      break;
+    case 5:
+      newModel->print();
+      break;
+    case 6:
+      trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+      break;
+    case 7:
+      saveModelToFlash(*newModel, NEW_MODEL_PATH);
+      break;
+    case 8:
+      newModel = loadModelFromFlash(NEW_MODEL_PATH);
+      break;
+    case 9:
+      sendModelToNetwork(*currentModel);
+      break;
+
+      case 10:
+      {
+        File abuga = SPIFFS.open(String(MODEL_PATH), "r");
+        while (abuga.available())
+        {
+          Serial.write(abuga.read());
+        }
+        abuga.close();
+        break;
+      }
+
+      case 11:
+      {
+        File abuga = SPIFFS.open(String(NEW_MODEL_PATH), "r");
+        while (abuga.available())
+        {
+          Serial.write(abuga.read());
+        }
+        abuga.close();
+        break;
+      }
+    default:
+      break;
+    }
+  }
+
+
+   processMessages();
 }
