@@ -1,0 +1,15 @@
+Pedro
+
+Receber o modelo no device
+Transformar o modelo
+- ajustar à biblioteca
+Treinar o novo modelo com o dataset do device
+- manter o modelo vingente para realizar inferência
+- enquanto está treinando com o novo modelo, sem interferir um ao outro
+Depois que terminar o treinamento, substituir o modelo antigo pelo novo 
+Enviar o modelo de volta
+
+Futuro
+
+Cálculo de outras métricas no próprio device
+- Recall, Acurácia, Precisão
