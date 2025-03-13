@@ -7,8 +7,6 @@
 #define ReLU                  // 0
 #define Softmax               // 1
 
-//#include <NeuralNetwork.h>
-//#include <SPIFFS.h>
 #include "ModelUtil.cpp"
 
 unsigned int layers[] = {20, 16, 8, 6}; // 4 layers (1st)layer with 3 input neurons (2nd & 3rd)layer 9 hidden neurons each and (4th)layer with 1 output neuron
@@ -51,10 +49,8 @@ void loop()
       trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
       break;
     case 3:
-      saveModelToFlash(*currentModel, MODEL_PATH);
       break;
     case 4:
-      currentModel = loadModelFromFlash(MODEL_PATH);
       break;
     case 5:
       newModel->print();
@@ -63,41 +59,13 @@ void loop()
       trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
       break;
     case 7:
-      saveModelToFlash(*newModel, NEW_MODEL_PATH);
       break;
     case 8:
-      newModel = loadModelFromFlash(NEW_MODEL_PATH);
       break;
     case 9:
-      sendModelToNetwork(*currentModel);
       break;
-
-      case 10:
-      {
-        File abuga = SPIFFS.open(String(MODEL_PATH), "r");
-        while (abuga.available())
-        {
-          Serial.write(abuga.read());
-        }
-        abuga.close();
-        break;
-      }
-
-      case 11:
-      {
-        File abuga = SPIFFS.open(String(NEW_MODEL_PATH), "r");
-        while (abuga.available())
-        {
-          Serial.write(abuga.read());
-        }
-        abuga.close();
-        break;
-      }
     default:
       break;
     }
   }
-
-
-   processMessages();
 }

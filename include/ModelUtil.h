@@ -54,22 +54,6 @@ NeuralNetwork* currentModel;
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions);
 
-bool saveModelToFlash(NeuralNetwork& NN, const String file);
-
-NeuralNetwork* loadModelFromFlash(const String& file);
-
-model transformDataToModel(Stream& stream);
-
 bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file);
-
-void processMessages();
-
-// --------------
-
-
-void setupMQTT();
-bool connectToWifi(bool forever = true);
-void mqttCallback(char* topic, byte* payload, unsigned int length);
-bool connectToServerMQTT(bool forever = true);
 
 #endif /* MODELUTIL_H_ */
