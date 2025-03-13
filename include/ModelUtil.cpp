@@ -70,8 +70,8 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
 
     SPIFFS.begin(true);
         
-    float bsize = 0;
-    float wsize = 0;
+    int bsize = 0;
+    int wsize = 0;
     for (unsigned int i = 1; i < numberOfLayers; i++) {
         bsize += layers[i];
     }
@@ -82,17 +82,15 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
     double initialBiases[bsize];
     double initialWeights[wsize];
     #else
-    float initialBiases[(int) bsize];
-    float initialWeights[(int) wsize];
+    float initialBiases[bsize];
+    float initialWeights[wsize];
     #endif
     
-    for (float i = 0; i < bsize; i++) {
-        // initialBiases[(int)i] = (i * 1.0f) / (1 + bsize * 1.0f);
-        initialBiases[(int)i] = rand() % 1000000 / 1000000.0f;
+    for (int i = 0; i < bsize; i++) {
+        initialBiases[i] = rand() % 1000000 / 1000000.0f;
     }
-    for (float i = 0; i < wsize; i++) {
-        // initialWeights[(int)i] = (1 + i * 1.0f) / (1 + wsize * 1.0f);
-        initialWeights[(int)i] = rand() % 1000000 / 1000000.0f;
+    for (int i = 0; i < wsize; i++) {
+        initialWeights[i] = rand() % 1000000 / 1000000.0f;
     }
 
     currentModel = new NeuralNetwork(_layers, initialWeights, initialBiases, _numberOfLayers, _actvFunctions);
