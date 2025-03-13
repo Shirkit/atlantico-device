@@ -85,110 +85,138 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
     float initialBiases[(int) bsize];
     float initialWeights[(int) wsize];
     #endif
-    Serial.println(sizeof(initialBiases));
-    Serial.println(sizeof(iinitialBiases));
-    Serial.println(sizeof(initialWeights));
-    Serial.println(sizeof(iinitialWeights));
+    
     for (float i = 0; i < bsize; i++) {
-        initialBiases[(int)i] = (i * 1.0f) / (bsize * 1.0f);
+        // initialBiases[(int)i] = (i * 1.0f) / (1 + bsize * 1.0f);
+        initialBiases[(int)i] = rand() % 1000000 / 1000000.0f;
     }
     for (float i = 0; i < wsize; i++) {
-        initialWeights[(int)i] = (i * 1.0f) / (wsize * 1.0f);
+        // initialWeights[(int)i] = (1 + i * 1.0f) / (1 + wsize * 1.0f);
+        initialWeights[(int)i] = rand() % 1000000 / 1000000.0f;
     }
+
     currentModel = new NeuralNetwork(_layers, initialWeights, initialBiases, _numberOfLayers, _actvFunctions);
-    newModel = new NeuralNetwork(_layers, iinitialWeights, iinitialBiases, _numberOfLayers, _actvFunctions);
     trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
-    trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+
+    newModel = new NeuralNetwork(_layers, iinitialWeights, iinitialBiases, _numberOfLayers, _actvFunctions);
+    // trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
 }
 
 bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
     Serial.println("Training model from original dataset...");
+    File xFile = SPIFFS.open(x_file, "r");
+    File yFile = SPIFFS.open(y_file, "r");
+
+    if (!xFile || !yFile) {
+        Serial.println("Error opening file");
+        return false;
+    }
+
+    char str[1024];
+    char *values;
+    #if defined(USE_64_BIT_DOUBLE)
+    double val;
+    double x[_layers[0]], y[_layers[_numberOfLayers - 1]];
+    #else
+    float val;
+    float x[_layers[0]], y[_layers[_numberOfLayers - 1]];
+    #endif
+    size_t bytes_read = 0;
+
+    int tk = 0;
+
+    NN.print();
+
     for (int t = 0; t < EPOCHS; t++) {
         Serial.println("Epoch: " + String(t));
-        File xFile = SPIFFS.open(x_file, "r");
-        File yFile = SPIFFS.open(y_file, "r");
-        if (!xFile || !yFile) {
-            Serial.println("Error opening file");
-            return false;
-        }
-        int len = NN.layers[0]._numberOfInputs;
-
+        tk = 0;
         // Read from file
-        char str[1024];
-        char *values;
-        #if defined(USE_64_BIT_DOUBLE)
-        double val;
-        double x[len * BATCH_SIZE], y[len * BATCH_SIZE];
-        #else
-        float val;
-        float x[len * BATCH_SIZE], y[len * BATCH_SIZE];
-        #endif
         while (xFile.available() && yFile.available()) {
+            Serial.print(" ====================== " + String(tk) + " ====================== ");
+
             int k = 0, j = 0;
-            for (int i = 0; i < BATCH_SIZE; i++) {
-                size_t bytes_read = xFile.readBytesUntil('\n', str, 1023);
-                if (bytes_read < 1) {
-                    break;
-                }
-                str[bytes_read] = '\0';
-                // Serial.println(str);
-        
-                values = strtok(str, ",");
-                while (values != NULL) {
-                    #if defined(USE_64_BIT_DOUBLE)
-                    val = strtod(values, NULL);
-                    #else
-                    val = strtof(values, NULL);
-                    #endif
-                    x[j % (len * BATCH_SIZE)] = val;
-                    if (val != val || val < -20 || val > 20) {
-                        // NaN check
-                        Serial.print("X: ");
-                        Serial.println(val);
-                    }
-                    j++;
-                    if (j % (len * BATCH_SIZE) == 0)
-                        j = 0;
-                    values = strtok(NULL, ",");
-                }
-        
-                bytes_read = yFile.readBytesUntil('\n', str, 1023);
-                if (bytes_read < 1) {
-                    break;
-                }
-                str[bytes_read] = '\0';
-        
-                values = strtok(str, ",");
-                j = 0;
-                while (values != NULL) {
-                    #if defined(USE_64_BIT_DOUBLE)
-                    val = strtod(values, NULL);
-                    #else
-                    val = strtof(values, NULL);
-                    #endif
-                    y[k % (len * BATCH_SIZE)] = val;
-                    if (val != val || val < -20 || val > 20) {
-                        Serial.print("X: ");
-                        Serial.println(val);
-                    }
-                    k++;
-                    if (k % (len * BATCH_SIZE) == 0)
-                        k = 0;
-                    values = strtok(NULL, ",");
-                }
+            bytes_read = xFile.readBytesUntil('\n', str, 1023);
+            if (bytes_read < 1) {
+                break;
             }
+            str[bytes_read] = '\0';
+
+            Serial.println();
+            Serial.print("str X: ");
+            Serial.println(str);
+    
+            values = strtok(str, ",");
+            while (values != NULL) {
+                Serial.print(values);
+                Serial.print(" ");
+                #if defined(USE_64_BIT_DOUBLE)
+                val = strtod(values, NULL);
+                #else
+                val = strtof(values, NULL);
+                #endif
+                x[j++] = val;
+                Serial.print(" (");
+                Serial.print(val);
+                Serial.print(") ");
+                Serial.print(" | ");
+                values = strtok(NULL, ",");
+            }
+            
+            bytes_read = yFile.readBytesUntil('\n', str, 1023);
+            if (bytes_read < 1) {
+                break;
+            }
+            str[bytes_read] = '\0';
+            Serial.println();
+            Serial.print("str Y: ");
+            Serial.println(str);
+    
+            values = strtok(str, ",");
+            while (values != NULL) {
+                Serial.print(values);
+                Serial.print(" ");
+                #if defined(USE_64_BIT_DOUBLE)
+                val = strtod(values, NULL);
+                #else
+                val = strtof(values, NULL);
+                #endif
+                y[k++] = val;
+                Serial.print(" (");
+                Serial.print(val);
+                Serial.print(") ");
+                Serial.print(" | ");
+                values = strtok(NULL, ",");
+            }
+
+            Serial.println();            
+            Serial.print("X: ");
+            for (int i = 0; i < _layers[0]; i++) {
+                Serial.print(x[i]);
+                Serial.print(" ");
+            }
+            Serial.println();
+            Serial.print("Y: ");
+            for (int i = 0; i < _layers[_numberOfLayers - 1]; i++) {
+                Serial.print(y[i]);
+                Serial.print(" ");
+            }
+            Serial.println();
 
             // Train model
             NN.FeedForward(x);
             NN.BackProp(y);
-            NN.getMeanSqrdError(BATCH_SIZE);
-            // Serial.println(NN.getMeanSqrdError(BATCH_SIZE));
+            NN.getMeanSqrdError(1);
+            
+            NN.print();
+            Serial.println(tk++);
+            Serial.println('\n');
         }
-        NN.print();
         
-        xFile.close();
-        yFile.close();
+        yFile.seek(0);
+        xFile.seek(0);
     }
-
+    
+    xFile.close();
+    yFile.close();
     return true;
 }
