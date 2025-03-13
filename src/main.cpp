@@ -1,6 +1,6 @@
 #define NumberOf(arg) ((unsigned int)(sizeof(arg) / sizeof(arg[0]))) // calculates the number of layers (in this case 4)
 
-#define _1_OPTIMIZE 0B00000001 // USE_64_BIT_DOUBLE
+// #define _1_OPTIMIZE 0B00000001 // USE_64_BIT_DOUBLE
 #define _2_OPTIMIZE 0B00100000 // MULTIPLE_BIASES_PER_LAYER
 
 #define ACTIVATION__PER_LAYER // DEFAULT KEYWORD for allowing the use of any Activation-Function per "Layer-to-Layer".
