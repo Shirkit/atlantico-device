@@ -99,7 +99,7 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
     trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
 
     newModel = new NeuralNetwork(_layers, iinitialWeights, iinitialBiases, _numberOfLayers, _actvFunctions);
-    // trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+    trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
 }
 
 bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
@@ -125,7 +125,9 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
 
     int tk = 0;
 
+    Serial.println(" ========= Input model =========");
     NN.print();
+    Serial.println(" ========= Input model end =========");
 
     for (int t = 0; t < EPOCHS; t++) {
         Serial.println("Epoch: " + String(t));
