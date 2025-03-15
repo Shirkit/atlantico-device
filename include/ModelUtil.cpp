@@ -171,49 +171,46 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
         while (xFile.available() && yFile.available()) {
             int k = 0, j = 0;
             bytes_read = xFile.readBytesUntil('\n', str, 1023);
-                if (bytes_read < 1) {
-                    break;
-                }
-                str[bytes_read] = '\0';
-        
-                values = strtok(str, ",");
-                while (values != NULL) {
-                    #if defined(USE_64_BIT_DOUBLE)
-                    val = strtod(values, NULL);
-                    #else
-                    val = strtof(values, NULL);
-                    #endif
+            if (bytes_read < 1) {
+                break;
+            }
+            str[bytes_read] = '\0';
+
+            values = strtok(str, ",");
+            while (values != NULL) {
+                #if defined(USE_64_BIT_DOUBLE)
+                val = strtod(values, NULL);
+                #else
+                val = strtof(values, NULL);
+                #endif
                 x[j++] = val;
-                    values = strtok(NULL, ",");
-                }
-        
-                bytes_read = yFile.readBytesUntil('\n', str, 1023);
-                if (bytes_read < 1) {
-                    break;
-                }
-                str[bytes_read] = '\0';
-        
-                values = strtok(str, ",");
-                while (values != NULL) {
-                    #if defined(USE_64_BIT_DOUBLE)
-                    val = strtod(values, NULL);
-                    #else
-                    val = strtof(values, NULL);
-                    #endif
-                y[k++] = val;
-                    values = strtok(NULL, ",");
+                values = strtok(NULL, ",");
             }
 
+            bytes_read = yFile.readBytesUntil('\n', str, 1023);
+            if (bytes_read < 1) {
+                break;
+            }
+            str[bytes_read] = '\0';
+
+            values = strtok(str, ",");
+            while (values != NULL) {
+                #if defined(USE_64_BIT_DOUBLE)
+                val = strtod(values, NULL);
+                #else
+                val = strtof(values, NULL);
+                #endif
+                y[k++] = val;
+                values = strtok(NULL, ",");
+            }
             // Train model
             NN.FeedForward(x);
             NN.BackProp(y);
             NN.getMeanSqrdError(1);
         }
-        
         yFile.seek(0);
         xFile.seek(0);
     }
-
     xFile.close();
     yFile.close();
     return true;
