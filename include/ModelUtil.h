@@ -20,7 +20,7 @@
 #define Y_TRAIN_PATH "/y_train_esp32.csv"
 #define GATHERED_DATA_PATH "/data.db"
 #define MQTT_TOPIC "esp32/ai"
-#define BATCH_SIZE 8
+// #define BATCH_SIZE 8
 #define EPOCHS 2
 #define WIFI_SSID "PedroRapha"
 #define WIFI_PASSOWRD "456123789a"
@@ -39,13 +39,8 @@
  */
 
 struct model {
-    #if defined(USE_64_BIT_DOUBLE)
-    double *biases;
-    double *weights;
-    #else
-    float *biases;
-    float *weights;
-    #endif
+    DFLOAT *biases;
+    DFLOAT *weights;
 };
 
 bool trainNewModel = false;
@@ -53,6 +48,8 @@ NeuralNetwork* newModel;
 NeuralNetwork* currentModel;
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions);
+
+void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, DFLOAT learningRateOfWeights, DFLOAT learningRateOfBiases);
 
 bool saveModelToFlash(NeuralNetwork& NN, const String file);
 

@@ -278,6 +278,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
                     Serial.println(m.biases[i]);
                 }
                 newModel = new NeuralNetwork(_layers, m.weights, m.biases, _numberOfLayers, _actvFunctions);
+                newModel->LearningRateOfBiases  = _learningRateOfBiases;
+                newModel->LearningRateOfWeights = _learningRateOfWeights;
                 trainNewModel = true;
             }
         } else {
