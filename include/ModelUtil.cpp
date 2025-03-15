@@ -8,22 +8,14 @@ unsigned int *_layers;
 int _numberOfLayers;
 byte *_actvFunctions;
 
-#ifdef USE_64_BIT_DOUBLE
-double iinitialBiases[] = 
-#else
-float iinitialBiases[] = 
-#endif
+DFLOAT iinitialBiases[] = 
 {
     -0.042701967, 0.34170863, 0.44121084, 0.18469329, 0.07429001, 0.037393782, 0.08623015, -0.2889944, 0.20989978, 0.19008951, 0.0676257, 0.19457616, 0.14333266, 0.15957156, 0.13817158, 0.3233372, 
     0.05153432, 0.10334184, 0.31067836, -0.05276156, -0.10387087, 0.07216197, 0.12189184, -0.0029788306, 
     0.026805317, -0.2291436, -0.2723658, 0.10984491, 0.2862673, 0.012778176, 
 };
 
-#ifdef USE_64_BIT_DOUBLE
-double iinitialWeights[] = 
-#else
-float iinitialWeights[] = 
-#endif
+DFLOAT iinitialWeights[] = 
 {
     0.27685285, 0.022836886, -0.07139334, 0.51887596, -0.08704708, -0.314498, 0.56033665, 0.20840052, 0.14321531, 0.03805903, 0.08386487, -0.08339847, 0.1862553, 0.07190731, -0.10341537, -0.016672991, 0.8764801, 0.2926347, 0.55595815, -0.5350627, 
     0.03419656, -0.03747988, 0.079029255, -0.28491774, 0.06540959, 0.502066, 0.44947422, 0.50785404, -0.2322425, 0.06668622, -0.23391211, 0.61191386, 0.06255472, -0.31934276, 0.032125805, 0.4289824, -0.58481, -0.041951567, 0.0076552727, 0.8493507, 
@@ -78,26 +70,22 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
     for (unsigned int i = 1; i < numberOfLayers; i++) {
         wsize += layers[i] * layers[i - 1];
     }
-    #ifdef USE_64_BIT_DOUBLE
-    double initialBiases[bsize];
-    double initialWeights[wsize];
-    #else
-    float initialBiases[bsize];
-    float initialWeights[wsize];
-    #endif
+    DFLOAT initialBiases[bsize], initialWeights[wsize];
     
     for (int i = 0; i < bsize; i++) {
-        initialBiases[i] = rand() % 1000000 / 1000000.0f;
+        initialBiases[i] = 0.4 + (rand() % 20000) / 100000.0;
     }
     for (int i = 0; i < wsize; i++) {
-        initialWeights[i] = rand() % 1000000 / 1000000.0f;
+        initialWeights[i] = 0.4 + (rand() % 20000) / 100000.0;
     }
 
     currentModel = new NeuralNetwork(_layers, initialWeights, initialBiases, _numberOfLayers, _actvFunctions);
+    currentModel->LearningRateOfWeights /= 10;
+    currentModel->LearningRateOfBiases /= 10;
     trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
 
-    newModel = new NeuralNetwork(_layers, iinitialWeights, iinitialBiases, _numberOfLayers, _actvFunctions);
-    trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+    // newModel = new NeuralNetwork(_layers, iinitialWeights, iinitialBiases, _numberOfLayers, _actvFunctions);
+    // trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
 }
 
 bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
@@ -112,13 +100,8 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
 
     char str[1024];
     char *values;
-    #if defined(USE_64_BIT_DOUBLE)
-    double val;
-    double x[_layers[0]], y[_layers[_numberOfLayers - 1]];
-    #else
-    float val;
-    float x[_layers[0]], y[_layers[_numberOfLayers - 1]];
-    #endif
+    DFLOAT val;
+    DFLOAT x[_layers[0]], y[_layers[_numberOfLayers - 1]];
     size_t bytes_read = 0;
 
     int tk = 0;

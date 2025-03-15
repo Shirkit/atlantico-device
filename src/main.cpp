@@ -4,7 +4,7 @@
 #define _2_OPTIMIZE 0B00100000 // MULTIPLE_BIASES_PER_LAYER
 
 #define ACTIVATION__PER_LAYER // DEFAULT KEYWORD for allowing the use of any Activation-Function per "Layer-to-Layer".
-#define ReLU                  // 0
+#define Tanh                  // 0
 #define Softmax               // 1
 
 #include "ModelUtil.cpp"
