@@ -25,9 +25,15 @@ DFLOAT _learningRateOfBiases;
 // -------------- Interface functions
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions) {
+    bootUp(layers, numberOfLayers, actvFunctions, 1, 1);
+}
+
+void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, DFLOAT learningRateOfWeights, DFLOAT learningRateOfBiases) {
     _layers = layers;
     _numberOfLayers = numberOfLayers;
     _actvFunctions = actvFunctions;
+    _learningRateOfWeights = learningRateOfWeights;
+    _learningRateOfBiases = learningRateOfBiases;
     // _clientName = clientName;
 
     Serial.println("Booting up...");
@@ -48,7 +54,25 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         if (currentModel != NULL) {
             delete currentModel;
         }
-        currentModel = new NeuralNetwork(_layers, _numberOfLayers, _actvFunctions);
+        int bsize = 0;
+        int wsize = 0;
+        for (unsigned int i = 1; i < _numberOfLayers; i++) {
+            bsize += _layers[i];
+        }
+        for (unsigned int i = 1; i < numberOfLayers; i++) {
+            wsize += _layers[i] * _layers[i - 1];
+        }
+        DFLOAT initialBiases[bsize], initialWeights[wsize];
+        
+        for (int i = 0; i < bsize; i++) {
+            initialBiases[i] = 0.4 + (rand() % 20000) / 100000.0;
+        }
+        for (int i = 0; i < wsize; i++) {
+            initialWeights[i] = 0.4 + (rand() % 20000) / 100000.0;
+        }
+        currentModel = new NeuralNetwork(_layers, initialWeights, initialBiases, _numberOfLayers, _actvFunctions);
+        currentModel->LearningRateOfBiases  = _learningRateOfWeights;
+        currentModel->LearningRateOfWeights = _learningRateOfBiases;
         trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
     }
 
@@ -111,26 +135,14 @@ model transformDataToModel(Stream& stream) {
     #endif
     JsonArray biases = doc["biases"];
     JsonArray weights = doc["weights"];
-    #if defined(USE_64_BIT_DOUBLE)
-    double bias[biases.size()], weight[weights.size()];
-    #else
-    float bias[biases.size()], weight[weights.size()];
-    #endif
+    DFLOAT bias[biases.size()], weight[weights.size()];
     int i = 0;
     for (JsonVariant v : biases) {
-        #if defined(USE_64_BIT_DOUBLE)
-        bias[i++] = v.as<double>();
-        #else
-        bias[i++] = v.as<float>();
-        #endif
+        bias[i++] = v.as<DFLOAT>();
     }
     i = 0;
     for (JsonVariant v : weights) {
-        #if defined(USE_64_BIT_DOUBLE)
-        weight[i++] = v.as<double>();
-        #else
-        weight[i++] = v.as<float>();
-        #endif
+        weight[i++] = v.as<DFLOAT>();
     }
     return {bias, weight};
 }
