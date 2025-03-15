@@ -16,6 +16,8 @@ StreamString incomingPayload = StreamString();
 unsigned int *_layers;
 int _numberOfLayers;
 byte *_actvFunctions;
+DFLOAT _learningRateOfWeights;
+DFLOAT _learningRateOfBiases;
 // TODO Write into file while receiving the payload to avoid using too much memory.
 // File tempFile;
 // String _clientName;
@@ -135,35 +137,32 @@ model transformDataToModel(Stream& stream) {
 
 bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
     Serial.println("Training model from original dataset...");
+    File xFile = SPIFFS.open(x_file, "r");
+    File yFile = SPIFFS.open(y_file, "r");
+
+    if (!xFile || !yFile) {
+        Serial.println("Error opening file");
+        return false;
+    }
+
+    char str[1024];
+    char *values;
+    DFLOAT val;
+    DFLOAT x[_layers[0]], y[_layers[_numberOfLayers - 1]];
+    size_t bytes_read = 0;
+
+    int tk = 0;
+
     for (int t = 0; t < EPOCHS; t++) {
         Serial.println("Epoch: " + String(t));
-        File xFile = SPIFFS.open(x_file, "r");
-        File yFile = SPIFFS.open(y_file, "r");
-        if (!xFile || !yFile) {
-            // Error opening file
-            return false;
-        }
-        int len = NN.layers[0]._numberOfInputs;
-
         // Read from file
-        char str[1024];
-        char *values;
-        #if defined(USE_64_BIT_DOUBLE)
-        double val;
-        double x[len * BATCH_SIZE], y[len * BATCH_SIZE];
-        #else
-        float val;
-        float x[len * BATCH_SIZE], y[len * BATCH_SIZE];
-        #endif
         while (xFile.available() && yFile.available()) {
             int k = 0, j = 0;
-            for (int i = 0; i < BATCH_SIZE; i++) {
-                size_t bytes_read = xFile.readBytesUntil('\n', str, 1023);
+            bytes_read = xFile.readBytesUntil('\n', str, 1023);
                 if (bytes_read < 1) {
                     break;
                 }
                 str[bytes_read] = '\0';
-                // Serial.println(str);
         
                 values = strtok(str, ",");
                 while (values != NULL) {
@@ -172,10 +171,7 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
                     #else
                     val = strtof(values, NULL);
                     #endif
-                    x[j % (len * BATCH_SIZE)] = val;
-                    j++;
-                    if (j % (len * BATCH_SIZE) == 0)
-                        j = 0;
+                x[j++] = val;
                     values = strtok(NULL, ",");
                 }
         
@@ -186,33 +182,28 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
                 str[bytes_read] = '\0';
         
                 values = strtok(str, ",");
-                j = 0;
                 while (values != NULL) {
                     #if defined(USE_64_BIT_DOUBLE)
                     val = strtod(values, NULL);
                     #else
                     val = strtof(values, NULL);
                     #endif
-                    y[k % (len * BATCH_SIZE)] = val;
-                    k++;
-                    if (k % (len * BATCH_SIZE) == 0)
-                        k = 0;
+                y[k++] = val;
                     values = strtok(NULL, ",");
-                }
             }
 
             // Train model
             NN.FeedForward(x);
             NN.BackProp(y);
-            NN.getMeanSqrdError(BATCH_SIZE);
-            // Serial.println(NN.getMeanSqrdError(BATCH_SIZE));
+            NN.getMeanSqrdError(1);
         }
-        NN.print();
         
-        xFile.close();
-        yFile.close();
+        yFile.seek(0);
+        xFile.seek(0);
     }
 
+    xFile.close();
+    yFile.close();
     return true;
 }
 
