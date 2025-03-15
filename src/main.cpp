@@ -4,7 +4,7 @@
 #define _2_OPTIMIZE 0B00100000 // MULTIPLE_BIASES_PER_LAYER
 
 #define ACTIVATION__PER_LAYER // DEFAULT KEYWORD for allowing the use of any Activation-Function per "Layer-to-Layer".
-#define ReLU                  // 0
+#define Tanh                  // 0
 #define Softmax               // 1
 
 //#include <NeuralNetwork.h>
@@ -18,6 +18,7 @@ double *output; // 4th layer's output
 void setup()
 {
   Serial.begin(115200);
+  randomSeed(1);
   bootUp(layers, NumberOf(layers), Actv_Functions);
 
   // trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
