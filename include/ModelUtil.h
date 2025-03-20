@@ -45,8 +45,8 @@ struct model {
 };
 
 bool trainNewModel = false;
-NeuralNetwork* newModel;
-NeuralNetwork* currentModel;
+NeuralNetwork* newModel = NULL;
+NeuralNetwork* currentModel = NULL;
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions);
 

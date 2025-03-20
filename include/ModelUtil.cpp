@@ -128,17 +128,17 @@ NeuralNetwork* loadModelFromFlash(const String& file) {
     if (!modelFile) {
         // Error opening file
         Serial.println("Error opening file");
-        modelFile.close();
+        return NULL;
     } else {
         NeuralNetwork* r = new NeuralNetwork(modelFile);
         modelFile.close();
         return r;
     }
-    return NULL;
 }
 
 model transformDataToModel(Stream& stream) {
     Serial.println("Transforming data to model...");
+    // TODO o tamanho padrão pode ser pequeno demais para caber todos os pesos e biases
     JsonDocument doc;
     
     ReadLoggingStream loggingStream(stream, Serial);
@@ -215,6 +215,7 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
 
     // Dynamic buffer allocation
     String xLine, yLine;
+    // TODO mover para o heap caso estoure a memória
     DFLOAT x[_layers[0]], y[_layers[_numberOfLayers - 1]];
 
     for (int t = 0; t < EPOCHS; t++) {
@@ -332,6 +333,7 @@ bool connectToWifi(bool forever) {
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    // TODO pode enfrentar race issues se receber múltiplas mensagens, fora se receber fora de ordem entre outros problemas
     // handle incoming messages
 
     if (strcmp(topic, MQTT_TOPIC) == 0) {
@@ -375,7 +377,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         else {
             // TODO should write into buffer file instead of storing all in memory to avoid issues with big files being received
             Serial.println("Payload received...");
-            SPIFFS.open("/temp/new_model.nn", "a").write(payload, length);
+            File ttt = SPIFFS.open("/temp/new_model.nn", "a");
+            ttt.write(payload, length);
+            ttt.close();
             incomingPayload.concat((char*)payload, length);
         }
     }
@@ -420,6 +424,7 @@ void sendModelToNetwork(NeuralNetwork& NN) {
     publishWithRetry(MQTT_TOPIC, "INICIO_TRANSMISSAO");
 
     delay(100);
+    // TODO o tamanho padrão pode ser pequeno demais para caber todos os pesos e biases
     JsonDocument doc;
 
 #if defined(USE_64_BIT_DOUBLE)
