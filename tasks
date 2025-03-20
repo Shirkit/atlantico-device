@@ -1,3 +1,35 @@
+fazer de forma mais genérica
+
+consertar a database
+
+realizar o treinamento
+enviar para o agregrador
+receber de volta do servidor
+treinar novamente depois de recebido
+
+métricas
+- acurácia
+- precisão
+- recall
+- f1 score
+- erro quadrático
+
+novos dados dos sensores implicam em dados não normalizados sendo escritos no dataset
+- teria que normalizar os dados
+- ou então pega o próprio dataset para simular as entradas
+    - tipo, pega aleatoriamente uma linha para simular o input
+
+==========
+
+definir qual vai ser o padrão que vai receber do dataset
+
+definir a arquitetura do arquivo de pesos e biases
+
+a estrutura que vai tratar o dataset tem que ser a mesma
+- se trocar o dataset fazer os mesmos passos
+
+
+
 Pedro
 
 Receber o modelo no device
