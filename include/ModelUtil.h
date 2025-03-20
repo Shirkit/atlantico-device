@@ -21,7 +21,7 @@
 #define GATHERED_DATA_PATH "/data.db"
 #define MQTT_TOPIC "esp32/ai"
 // #define BATCH_SIZE 8
-#define EPOCHS 2
+#define EPOCHS 1
 #define WIFI_SSID "PedroRapha"
 #define WIFI_PASSOWRD "456123789a"
 #define MQTT_BROKER "192.168.15.13"

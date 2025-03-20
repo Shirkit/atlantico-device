@@ -25,7 +25,7 @@ DFLOAT _learningRateOfBiases;
 // -------------- Interface functions
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions) {
-    bootUp(layers, numberOfLayers, actvFunctions, 1, 1);
+    bootUp(layers, numberOfLayers, actvFunctions, 0, 0);
 }
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, DFLOAT learningRateOfWeights, DFLOAT learningRateOfBiases) {
@@ -44,7 +44,7 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         return;
     }
 
-    if (false and SPIFFS.exists(MODEL_PATH)) {
+    if (SPIFFS.exists(MODEL_PATH)) {
         if (currentModel != NULL) {
             delete currentModel;
         }
@@ -65,12 +65,18 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         DFLOAT initialBiases[bsize], initialWeights[wsize];
         
         for (int i = 0; i < bsize; i++) {
-            initialBiases[i] = 0.4 + (rand() % 20000) / 100000.0;
+            // initialBiases[i] = 0.1 + (rand() % 10000) / 100000.0;
+            initialBiases[i] = 0.50;
         }
         for (int i = 0; i < wsize; i++) {
-            initialWeights[i] = 0.4 + (rand() % 20000) / 100000.0;
+            // initialWeights[i] = 0.1 + (rand() % 10000) / 100000.0;
+            initialWeights[i] = 0.25;
         }
         currentModel = new NeuralNetwork(_layers, initialWeights, initialBiases, _numberOfLayers, _actvFunctions);
+        if (_learningRateOfBiases == 0)
+            _learningRateOfBiases = currentModel->LearningRateOfBiases;
+        if (_learningRateOfWeights == 0)
+            _learningRateOfWeights = currentModel->LearningRateOfWeights;
         currentModel->LearningRateOfBiases  = _learningRateOfWeights;
         currentModel->LearningRateOfWeights = _learningRateOfBiases;
         trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
@@ -90,7 +96,7 @@ bool saveModelToFlash(NeuralNetwork& NN, const String file) {
         result = NN.save(modelFile);
     }
     Serial.println("Result: " + String(result));
-    // modelFile.close();
+    modelFile.close();
     return result;
 }
 
@@ -99,6 +105,7 @@ NeuralNetwork* loadModelFromFlash(const String& file) {
     File modelFile = SPIFFS.open(file, "r");
     if (!modelFile) {
         // Error opening file
+        Serial.println("Error opening file");
         modelFile.close();
     } else {
         NeuralNetwork* r = new NeuralNetwork(modelFile);
@@ -166,7 +173,7 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
     int tk = 0;
 
     for (int t = 0; t < EPOCHS; t++) {
-        Serial.println("Epoch: " + String(t));
+        Serial.println("Epoch: " + String(t + 1));
         // Read from file
         while (xFile.available() && yFile.available()) {
             int k = 0, j = 0;

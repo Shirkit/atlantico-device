@@ -4,22 +4,26 @@
 #define _2_OPTIMIZE 0B00100000 // MULTIPLE_BIASES_PER_LAYER
 
 #define ACTIVATION__PER_LAYER // DEFAULT KEYWORD for allowing the use of any Activation-Function per "Layer-to-Layer".
-#define Tanh                  // 0
-#define Softmax               // 1
+#define Sigmoid
+#define Tanh
+#define ReLU
+#define Softmax
+// #define LeakyReLU
+// #define ELU
+// #define SELU
 
 //#include <NeuralNetwork.h>
 //#include <SPIFFS.h>
 #include "ModelUtil.cpp"
 
-unsigned int layers[] = {20, 16, 8, 6}; // 4 layers (1st)layer with 3 input neurons (2nd & 3rd)layer 9 hidden neurons each and (4th)layer with 1 output neuron
-byte Actv_Functions[] = {0, 0, 1};      // 0 = ReLU, 1 = Softmax
-double *output; // 4th layer's output
+unsigned int layers[] = { 20, 16, 8, 6 };
+byte Actv_Functions[] = { 2, 2, 3 };
 
 void setup()
 {
   Serial.begin(115200);
-  randomSeed(1);
-  bootUp(layers, NumberOf(layers), Actv_Functions);
+  randomSeed(10);
+  bootUp(layers, NumberOf(layers), Actv_Functions, 0.01, 0.001);
 
   // trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
 
@@ -29,11 +33,14 @@ void setup()
   Serial.println("2. Train Model");
   Serial.println("3. Save Model");
   Serial.println("4. Load Model");
-  Serial.println("5. Print New Model");
-  Serial.println("6. Train New Model");
-  Serial.println("7. Save New Model");
-  Serial.println("8. Load New Model");
-  Serial.println("9. Send Current Model to Network");
+  Serial.println("5. Send Model to Network");
+  Serial.println("9. Delete Model");
+  Serial.println("11. Print New Model");
+  Serial.println("12. Train New Model");
+  Serial.println("13. Save New Model");
+  Serial.println("14. Load New Model");
+  Serial.println("15. Send Model to Network");
+  Serial.println("19. Delete New Model");
 }
 
 void loop()
@@ -42,7 +49,7 @@ void loop()
   if (Serial.available() != 0)
   {
     int option = Serial.parseInt();
-  
+
     switch (option)
     {
     case 1:
@@ -58,47 +65,40 @@ void loop()
       currentModel = loadModelFromFlash(MODEL_PATH);
       break;
     case 5:
-      newModel->print();
-      break;
-    case 6:
-      trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
-      break;
-    case 7:
-      saveModelToFlash(*newModel, NEW_MODEL_PATH);
-      break;
-    case 8:
-      newModel = loadModelFromFlash(NEW_MODEL_PATH);
-      break;
-    case 9:
       sendModelToNetwork(*currentModel);
       break;
-
-      case 10:
-      {
-        File abuga = SPIFFS.open(String(MODEL_PATH), "r");
-        while (abuga.available())
-        {
-          Serial.write(abuga.read());
-        }
-        abuga.close();
-        break;
+    case 6:
+      for (int i = 0; i < sizeof(layers); i++) {
       }
-
-      case 11:
-      {
-        File abuga = SPIFFS.open(String(NEW_MODEL_PATH), "r");
-        while (abuga.available())
-        {
-          Serial.write(abuga.read());
-        }
-        abuga.close();
-        break;
-      }
+      break;
+    case 9:
+    {
+      SPIFFS.exists(MODEL_PATH) ? SPIFFS.remove(MODEL_PATH) : Serial.println("Model not found");
+      break;
+    }
+    case 11:
+      newModel->print();
+      break;
+    case 12:
+      trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+      break;
+    case 13:
+      saveModelToFlash(*newModel, NEW_MODEL_PATH);
+      break;
+    case 14:
+      newModel = loadModelFromFlash(NEW_MODEL_PATH);
+      break;
+    case 15:
+      sendModelToNetwork(*currentModel);
+      break;
+    case 19:
+      SPIFFS.exists(NEW_MODEL_PATH) ? SPIFFS.remove(NEW_MODEL_PATH) : Serial.println("Model not found");
+      break;
     default:
       break;
     }
   }
 
 
-   processMessages();
+  processMessages();
 }
