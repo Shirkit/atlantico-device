@@ -166,6 +166,7 @@ model transformDataToModel(Stream& stream) {
     JsonArray weights = doc["weights"];
     DFLOAT* bias = new DFLOAT[biases.size()];
     DFLOAT* weight = new DFLOAT[weights.size()];
+    // ! this will leak memory
 
     for (int i = 0; i < biases.size(); i++) {
 #if defined(USE_64_BIT_DOUBLE)
@@ -364,7 +365,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
                     delete newModel;
                 }
                 newModel = new NeuralNetwork(_layers, m.weights, m.biases, _numberOfLayers, _actvFunctions);
-                // remember to not free m.weights and m.biases if isAllocdWithNew is false
+                // TODO remember to not free m.weights and m.biases if isAllocdWithNew is false
+                // ! this will leak memory if not freed
                 newModel->LearningRateOfBiases = _learningRateOfBiases;
                 newModel->LearningRateOfWeights = _learningRateOfWeights;
                 trainNewModel = true;
