@@ -24,6 +24,26 @@ DFLOAT _learningRateOfBiases;
 
 // -------------- Interface functions
 
+bool ensureConnected() {
+    if (!WiFi.isConnected()) {
+      return connectToWifi(false);
+    }
+    if (!_client.connected()) {
+      return connectToServerMQTT(false);
+    }
+    return true;
+  }
+
+  bool publishWithRetry(const char* topic, const char* payload, int retries = 3) {
+    for (int i = 0; i < retries; i++) {
+      if (_client.publish(topic, payload)) {
+        return true;
+      }
+      delay(100);
+    }
+    return false;
+  }
+
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions) {
     bootUp(layers, numberOfLayers, actvFunctions, 0, 0);
 }
@@ -242,19 +262,21 @@ bool connectToWifi(bool forever) {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.println("Already connected to Wifi");
         return true;
-    } else {
+    }
+    else {
         Serial.println("Connecting to wifi...");
-        WiFi.begin(WIFI_SSID, WIFI_PASSOWRD);
-        while (WiFi.status() != WL_CONNECTED || forever) {
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        unsigned long startTime = millis();
+        unsigned long timeout = CONNECTION_TIMEOUT; // 30 second timeout
+        while (WiFi.status() != WL_CONNECTED && (forever || millis() - startTime < timeout)) {
             delay(500);
-            if (WiFi.status() == WL_CONNECTED) {
-                Serial.println("Wifi connected");
-                Serial.println("IP address: " + WiFi.localIP().toString());
-                return true;
-            }
+        }
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("Wifi connected");
+            Serial.println("IP address: " + WiFi.localIP().toString());
+            return true;
         }
         Serial.println("Failed to connect to Wifi");
-        // TODO: Need to handle wifi connection in case of error
         return false;
     }
 }
@@ -295,20 +317,26 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 bool connectToServerMQTT(bool forever) {
-    if(_client.connected()) {
+    if (_client.connected()) {
         Serial.println("Already connected to server MQTT");
         return true;
-    } else {
+    }
+    else {
         Serial.println("Connecting to server MQTT...");
-        while (!_client.connected() || forever) {
-            if (_client.connect(String(CLIENT_NAME).c_str())) {
+        unsigned long startTime = millis();
+        unsigned long timeout = CONNECTION_TIMEOUT; // 30 second timeout
+        while (!_client.connected() && (forever || millis() - startTime < timeout)) {
+            // Use a unique client ID with timestamp to avoid connection conflicts
+            String clientId = CLIENT_NAME;
+            clientId += String(millis());
+
+            if (_client.connect(clientId.c_str())) {
                 _client.subscribe(MQTT_TOPIC);
                 Serial.println("Connected to server MQTT");
                 return true;
             }
         }
         Serial.println("Failed to connect to server MQTT");
-        // TODO: Need to handle unable to connect to server
         return false;
     }
 }

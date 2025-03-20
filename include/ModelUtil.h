@@ -23,10 +23,11 @@
 // #define BATCH_SIZE 8
 #define EPOCHS 1
 #define WIFI_SSID "PedroRapha"
-#define WIFI_PASSOWRD "456123789a"
+#define WIFI_PASSWORD "456123789a"
 #define MQTT_BROKER "192.168.15.13"
 #define CLIENT_NAME "esp01"
 #define MQTT_MESSAGE_SIZE 200
+#define CONNECTION_TIMEOUT 30000 // in miliseconds
 
 /**
  * Defining the JSON structure for networking messaging
