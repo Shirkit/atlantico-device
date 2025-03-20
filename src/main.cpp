@@ -4,8 +4,8 @@
 #define _2_OPTIMIZE 0B00100000 // MULTIPLE_BIASES_PER_LAYER
 
 #define ACTIVATION__PER_LAYER // DEFAULT KEYWORD for allowing the use of any Activation-Function per "Layer-to-Layer".
-#define Sigmoid
-#define Tanh
+// #define Sigmoid
+// #define Tanh
 #define ReLU
 #define Softmax
 // #define LeakyReLU
@@ -17,17 +17,9 @@
 #include "ModelUtil.cpp"
 
 unsigned int layers[] = { 20, 16, 8, 6 };
-byte Actv_Functions[] = { 2, 2, 3 };
+byte Actv_Functions[] = { 0, 0, 1 };
 
-void setup()
-{
-  Serial.begin(115200);
-  randomSeed(10);
-  bootUp(layers, NumberOf(layers), Actv_Functions, 0.01, 0.001);
-
-  // trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
-
-  // saveModelToFlash(*currentModel, MODEL_PATH);
+void printInstructions() {
   Serial.println("Choose an option to coninue:");
   Serial.println("1. Print Model");
   Serial.println("2. Train Model");
@@ -41,6 +33,15 @@ void setup()
   Serial.println("14. Load New Model");
   Serial.println("15. Send Model to Network");
   Serial.println("19. Delete New Model");
+  Serial.println("99. Print these Instructions");
+}
+
+void setup()
+{
+  Serial.begin(115200);
+  randomSeed(10);
+  bootUp(layers, NumberOf(layers), Actv_Functions, 0, 0);
+  printInstructions();
 }
 
 void loop()
@@ -93,6 +94,9 @@ void loop()
       break;
     case 19:
       SPIFFS.exists(NEW_MODEL_PATH) ? SPIFFS.remove(NEW_MODEL_PATH) : Serial.println("Model not found");
+      break;
+    case 99:
+      printInstructions();
       break;
     default:
       break;
