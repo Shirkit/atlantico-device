@@ -13,13 +13,12 @@ WiFiClient __espClient;
 PubSubClient _client(__espClient);
 
 StreamString incomingPayload = StreamString();
-unsigned int *_layers;
+unsigned int* _layers;
 int _numberOfLayers;
-byte *_actvFunctions;
+byte* _actvFunctions;
 DFLOAT _learningRateOfWeights;
 DFLOAT _learningRateOfBiases;
 // TODO Write into file while receiving the payload to avoid using too much memory.
-// File tempFile;
 // String _clientName;
 
 // -------------- Interface functions
@@ -74,6 +73,7 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         if (currentModel != NULL) {
             delete currentModel;
         }
+        /* if you want to follow this way, you need to manage the memory of the arrays yourself since the NN object does not copy the values
         int bsize = 0;
         int wsize = 0;
         for (unsigned int i = 1; i < _numberOfLayers; i++) {
@@ -82,8 +82,9 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         for (unsigned int i = 1; i < numberOfLayers; i++) {
             wsize += _layers[i] * _layers[i - 1];
         }
-        DFLOAT initialBiases[bsize], initialWeights[wsize];
-        
+        DFLOAT* initialBiases = new DFLOAT[bsize];
+        DFLOAT* initialWeights = new DFLOAT[wsize];
+
         for (int i = 0; i < bsize; i++) {
             // initialBiases[i] = 0.1 + (rand() % 10000) / 100000.0;
             initialBiases[i] = 0.50;
@@ -91,14 +92,15 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         for (int i = 0; i < wsize; i++) {
             // initialWeights[i] = 0.1 + (rand() % 10000) / 100000.0;
             initialWeights[i] = 0.25;
-        }
-        currentModel = new NeuralNetwork(_layers, initialWeights, initialBiases, _numberOfLayers, _actvFunctions);
+        }*/
+        // currentModel = new NeuralNetwork(_layers, initialWeights, initialBiases, _numberOfLayers, _actvFunctions); // could not figure out a way to set without exploding the gradients
+        currentModel = new NeuralNetwork(_layers, _numberOfLayers, _actvFunctions);
         if (_learningRateOfBiases == 0)
             _learningRateOfBiases = currentModel->LearningRateOfBiases;
         if (_learningRateOfWeights == 0)
             _learningRateOfWeights = currentModel->LearningRateOfWeights;
-        currentModel->LearningRateOfBiases  = _learningRateOfWeights;
-        currentModel->LearningRateOfWeights = _learningRateOfBiases;
+        currentModel->LearningRateOfBiases = _learningRateOfBiases;
+        currentModel->LearningRateOfWeights = _learningRateOfWeights;
         trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
     }
 
@@ -146,32 +148,58 @@ model transformDataToModel(Stream& stream) {
     if (result != DeserializationError::Ok) {
         Serial.println(result.code());
         Serial.println("JSON failed to deserialize");
-        return {NULL, NULL};
+        return { NULL, NULL };
     }
     const char* precision = doc["precision"];
-    #if defined(USE_64_BIT_DOUBLE)
+#if defined(USE_64_BIT_DOUBLE)
     if (strcmp(precision, "double") != 0) {
         // error loading the model, precision missmatch
-        return {NULL, NULL};
+        return { NULL, NULL };
     }
-    #else
+#else
     if (strcmp(precision, "float") != 0) {
         // error loading the model, precision missmatch
-        return {NULL, NULL};
+        return { NULL, NULL, 0, 0 };
     }
-    #endif
+#endif
     JsonArray biases = doc["biases"];
     JsonArray weights = doc["weights"];
-    DFLOAT bias[biases.size()], weight[weights.size()];
-    int i = 0;
-    for (JsonVariant v : biases) {
-        bias[i++] = v.as<DFLOAT>();
+    DFLOAT* bias = new DFLOAT[biases.size()];
+    DFLOAT* weight = new DFLOAT[weights.size()];
+
+    for (int i = 0; i < biases.size(); i++) {
+#if defined(USE_64_BIT_DOUBLE)
+        // If using double precision and values were serialized as strings
+        if (biases[i].is<const char*>()) {
+            bias[i] = strtod(biases[i].as<const char*>(), NULL);
+        }
+        else {
+            bias[i] = biases[i].as<DFLOAT>();
+        }
+#else
+        bias[i] = biases[i].as<DFLOAT>();
+#endif
+        Serial.print(i);
+        Serial.print(":");
+        Serial.println(bias[i], 8);  // Print with high precision
     }
-    i = 0;
-    for (JsonVariant v : weights) {
-        weight[i++] = v.as<DFLOAT>();
+
+    for (int i = 0; i < weights.size(); i++) {
+#if defined(USE_64_BIT_DOUBLE)
+        // If using double precision and values were serialized as strings
+        if (weights[i].is<const char*>()) {
+            weight[i] = strtod(weights[i].as<const char*>(), NULL);
+        }
+        else {
+            weight[i] = weights[i].as<DFLOAT>();
+        }
+#else
+        weight[i] = weights[i].as<DFLOAT>();
+#endif
     }
-    return {bias, weight};
+
+    Serial.println();
+    return { bias, weight };
 }
 
 bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
@@ -184,60 +212,81 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
         return false;
     }
 
-    char str[1024];
-    char *values;
-    DFLOAT val;
+    // Dynamic buffer allocation
+    String xLine, yLine;
     DFLOAT x[_layers[0]], y[_layers[_numberOfLayers - 1]];
-    size_t bytes_read = 0;
-
-    int tk = 0;
 
     for (int t = 0; t < EPOCHS; t++) {
         Serial.println("Epoch: " + String(t + 1));
+        
         // Read from file
         while (xFile.available() && yFile.available()) {
-            int k = 0, j = 0;
-            bytes_read = xFile.readBytesUntil('\n', str, 1023);
-            if (bytes_read < 1) {
+            // Read full lines using String which handles dynamic memory
+            xLine = xFile.readStringUntil('\n');
+            yLine = yFile.readStringUntil('\n');
+            
+            if (xLine.length() == 0 || yLine.length() == 0) {
                 break;
             }
-            str[bytes_read] = '\0';
-
-            values = strtok(str, ",");
-            while (values != NULL) {
+            
+            // Parse x values
+            int j = 0;
+            int startPos = 0;
+            int commaPos = xLine.indexOf(',');
+            while (commaPos >= 0 && j < _layers[0]) {
+                String valueStr = xLine.substring(startPos, commaPos);
                 #if defined(USE_64_BIT_DOUBLE)
-                val = strtod(values, NULL);
+                x[j++] = strtod(valueStr.c_str(), NULL);
                 #else
-                val = strtof(values, NULL);
+                x[j++] = strtof(valueStr.c_str(), NULL);
                 #endif
-                x[j++] = val;
-                values = strtok(NULL, ",");
+                startPos = commaPos + 1;
+                commaPos = xLine.indexOf(',', startPos);
             }
-
-            bytes_read = yFile.readBytesUntil('\n', str, 1023);
-            if (bytes_read < 1) {
-                break;
-            }
-            str[bytes_read] = '\0';
-
-            values = strtok(str, ",");
-            while (values != NULL) {
+            // Handle last value
+            if (startPos < xLine.length() && j < _layers[0]) {
+                String valueStr = xLine.substring(startPos);
                 #if defined(USE_64_BIT_DOUBLE)
-                val = strtod(values, NULL);
+                x[j++] = strtod(valueStr.c_str(), NULL);
                 #else
-                val = strtof(values, NULL);
+                x[j++] = strtof(valueStr.c_str(), NULL);
                 #endif
-                y[k++] = val;
-                values = strtok(NULL, ",");
             }
+            
+            // Parse y values
+            int k = 0;
+            startPos = 0;
+            commaPos = yLine.indexOf(',');
+            while (commaPos >= 0 && k < _layers[_numberOfLayers - 1]) {
+                String valueStr = yLine.substring(startPos, commaPos);
+                #if defined(USE_64_BIT_DOUBLE)
+                y[k++] = strtod(valueStr.c_str(), NULL);
+                #else
+                y[k++] = strtof(valueStr.c_str(), NULL);
+                #endif
+                startPos = commaPos + 1;
+                commaPos = yLine.indexOf(',', startPos);
+            }
+            // Handle last value
+            if (startPos < yLine.length() && k < _layers[_numberOfLayers - 1]) {
+                String valueStr = yLine.substring(startPos);
+                #if defined(USE_64_BIT_DOUBLE)
+                y[k++] = strtod(valueStr.c_str(), NULL);
+                #else
+                y[k++] = strtof(valueStr.c_str(), NULL);
+                #endif
+            }
+            
             // Train model
             NN.FeedForward(x);
             NN.BackProp(y);
             NN.getMeanSqrdError(1);
         }
+        
         yFile.seek(0);
         xFile.seek(0);
     }
+    
     xFile.close();
     yFile.close();
     return true;
@@ -287,30 +336,44 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (strcmp(topic, MQTT_TOPIC) == 0) {
         if (String((char*)payload).startsWith("INICIO_TRANSMISSAO")) {
             Serial.println("Starting transmission...");
+            if (!SPIFFS.exists("/temp")) {
+                SPIFFS.mkdir("/temp");
+            }
+            if (SPIFFS.exists("/temp/new_model.nn")) {
+                SPIFFS.remove("/temp/new_model.nn");
+            }
             incomingPayload.clear();
-        } else if (String((char*)payload).startsWith("FIM_TRANSMISSAO")) {
+        }
+        else if (String((char*)payload).startsWith("FIM_TRANSMISSAO")) {
             Serial.println("Ending transmission...");
-            // Serial.println(incomingPayload);
-            model m = transformDataToModel(incomingPayload);
+            model m;
+            if (false) {
+                File tempFile = SPIFFS.open("/temp_model.json", "r");
+                if (!tempFile) {
+                    Serial.println("Error opening temp file");
+                    return;
+                }
+                m = transformDataToModel(tempFile);
+            }
+            else {
+                m = transformDataToModel(incomingPayload);
+            }
             if (m.biases != NULL && m.weights != NULL) {
                 Serial.println("Model parsed successfully...");
                 if (newModel != NULL) {
                     delete newModel;
                 }
-                for (int i = 0; i < sizeof(m.weights); i++) {
-                    Serial.println(m.weights[i]);
-                }
-                for (int i = 0; i < sizeof(m.biases); i++) {
-                    Serial.println(m.biases[i]);
-                }
                 newModel = new NeuralNetwork(_layers, m.weights, m.biases, _numberOfLayers, _actvFunctions);
-                newModel->LearningRateOfBiases  = _learningRateOfBiases;
+                // remember to not free m.weights and m.biases if isAllocdWithNew is false
+                newModel->LearningRateOfBiases = _learningRateOfBiases;
                 newModel->LearningRateOfWeights = _learningRateOfWeights;
                 trainNewModel = true;
             }
-        } else {
+        }
+        else {
             // TODO should write into buffer file instead of storing all in memory to avoid issues with big files being received
             Serial.println("Payload received...");
+            SPIFFS.open("/temp/new_model.nn", "a").write(payload, length);
             incomingPayload.concat((char*)payload, length);
         }
     }
@@ -335,6 +398,9 @@ bool connectToServerMQTT(bool forever) {
                 Serial.println("Connected to server MQTT");
                 return true;
             }
+
+            Serial.println("Failed to connect, retrying in 2 seconds...");
+            delay(2000);
         }
         Serial.println("Failed to connect to server MQTT");
         return false;
@@ -342,35 +408,40 @@ bool connectToServerMQTT(bool forever) {
 }
 
 void sendModelToNetwork(NeuralNetwork& NN) {
-    
+
+    if (!ensureConnected()) {
+        return;
+    }
+
     Serial.println("Sending model to the network...");
-    
-    _client.publish(MQTT_TOPIC, "INICIO_TRANSMISSAO");
+
+    publishWithRetry(MQTT_TOPIC, "INICIO_TRANSMISSAO");
+
     delay(100);
     JsonDocument doc;
 
-    #if defined(USE_64_BIT_DOUBLE)
+#if defined(USE_64_BIT_DOUBLE)
     doc["precision"] = "double";
-    #else
+#else
     doc["precision"] = "float";
-    #endif
+#endif
 
     doc["biases"] = JsonArray();
     doc["weights"] = JsonArray();
 
-    for(unsigned int n=0; n<NN.numberOflayers; n++){
-        for(unsigned int i=0; i<NN.layers[n]._numberOfOutputs; i++) {
-            #if defined(USE_64_BIT_DOUBLE)
+    for (unsigned int n = 0; n < NN.numberOflayers; n++) {
+        for (unsigned int i = 0; i < NN.layers[n]._numberOfOutputs; i++) {
+#if defined(USE_64_BIT_DOUBLE)
             doc["biases"].add(String(NN.layers[n].bias[i], 16));
-            #else
+#else
             doc["biases"].add(NN.layers[n].bias[i]);
-            #endif
-            for(unsigned int j=0; j<NN.layers[n]._numberOfInputs; j++){
-                #if defined(USE_64_BIT_DOUBLE)
+#endif
+            for (unsigned int j = 0; j < NN.layers[n]._numberOfInputs; j++) {
+#if defined(USE_64_BIT_DOUBLE)
                 doc["weights"].add(String(NN.layers[n].weights[i][j], 16));
-                #else
+#else
                 doc["weights"].add(NN.layers[n].weights[i][j]);
-                #endif
+#endif
             }
         }
     }
@@ -381,25 +452,24 @@ void sendModelToNetwork(NeuralNetwork& NN) {
     char buffer[MQTT_MESSAGE_SIZE];
     size_t bytesRemaining = len;
     size_t currentPosition = 0;
-    
+
     while (bytesRemaining > 0) {
-        size_t bytesToRead = min((size_t) MQTT_MESSAGE_SIZE - 1, bytesRemaining);
+        size_t bytesToRead = min((size_t)MQTT_MESSAGE_SIZE - 1, bytesRemaining);
         size_t bytes_read = stream.readBytes(buffer, bytesToRead);
         buffer[bytes_read] = '\0';
-        
-        _client.publish(MQTT_TOPIC, buffer);
+
+        publishWithRetry(MQTT_TOPIC, buffer);
+
         bytesRemaining -= bytes_read;
         currentPosition += bytes_read;
-        
+
         delay(100);
     }
 
     Serial.println("Model sent to the network...");
-    _client.publish(MQTT_TOPIC, "FIM_TRANSMISSAO");
+    publishWithRetry(MQTT_TOPIC, "FIM_TRANSMISSAO");
 
-//    Serial.println(stream);
-
-
+    //    Serial.println(stream);
 }
 
 // -------------- Unimplemeneted
