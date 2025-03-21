@@ -18,6 +18,8 @@
 #define NEW_MODEL_PATH "/new_model.nn"
 #define X_TRAIN_PATH "/x_train_esp32.csv"
 #define Y_TRAIN_PATH "/y_train_esp32.csv"
+#define X_TEST_PATH "/x_test_esp32.csv"
+#define Y_TEST_PATH "/y_test_esp32.csv"
 #define GATHERED_DATA_PATH "/data.db"
 #define MQTT_TOPIC "esp32/ai"
 // #define BATCH_SIZE 8
@@ -157,6 +159,16 @@ struct multiClassClassifierMetrics {
     }
 };
 
+struct testData {
+    DFLOAT* x;
+    DFLOAT* y;
+
+    ~testData() {
+        delete[] x;
+        delete[] y;
+    }
+};
+
 bool trainNewModel = false;
 NeuralNetwork* newModel = NULL;
 NeuralNetwork* currentModel = NULL;
@@ -176,6 +188,10 @@ model* transformDataToModel(Stream& stream);
 multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file);
 
 void processMessages();
+
+DFLOAT* predictFromCurrentModel(DFLOAT* x);
+
+testData* readTestData();
 
 // --------------
 

@@ -19,6 +19,8 @@ byte* _actvFunctions;
 DFLOAT _learningRateOfWeights;
 DFLOAT _learningRateOfBiases;
 model *tempModel;
+
+File xTest, yTest;
 // TODO Write into file while receiving the payload to avoid using too much memory.
 // String _clientName;
 
@@ -113,6 +115,9 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         }
         currentModelMetrics = trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
     }
+
+    xTest = SPIFFS.open(X_TEST_PATH, "r");
+    yTest = SPIFFS.open(Y_TEST_PATH, "r");
 
     setupMQTT();
 }
@@ -517,6 +522,99 @@ void sendModelToNetwork(NeuralNetwork& NN) {
     //    Serial.println(stream);
 }
 
+DFLOAT* predictFromCurrentModel(DFLOAT* x) {
+    return currentModel->FeedForward(x);
+}
+
+testData* readTestData() {
+    if (!xTest) {
+        Serial.println("Error opening file");
+        return NULL;
+    }
+    if (!yTest) {
+        Serial.println("Error opening file");
+        return NULL;
+    }
+
+    if (!xTest.available() || !yTest.available()) {
+        xTest.seek(0);
+        yTest.seek(0);
+    }
+
+    String xLine = xTest.readStringUntil('\n');
+    String yLine = yTest.readStringUntil('\n');
+    
+    if (xLine.length() == 0 || yLine.length() == 0) {
+        xTest.seek(0);
+        yTest.seek(0);
+        xLine = xTest.readStringUntil('\n');
+        yLine = yTest.readStringUntil('\n');
+        if (xLine.length() == 0 || yLine.length() == 0) {
+            // can't recover from this error
+            Serial.println("Error reading test file");
+            return NULL;
+        }
+    }
+    
+    int j = 0;
+    int startPos = 0;
+    int commaPos = xLine.indexOf(',');
+
+    // is there a better way to do this? do we need to allocate on the heap? can we use a fixed size array and attach on the struct without the heap?
+    DFLOAT *x = new DFLOAT[_layers[0]], *y = new DFLOAT[_layers[_numberOfLayers - 1]];
+
+    while (commaPos >= 0 && j < _layers[0]) {
+        String valueStr = xLine.substring(startPos, commaPos);
+        #if defined(USE_64_BIT_DOUBLE)
+        x[j++] = strtod(valueStr.c_str(), NULL);
+        #else
+        x[j++] = strtof(valueStr.c_str(), NULL);
+        #endif
+        startPos = commaPos + 1;
+        commaPos = xLine.indexOf(',', startPos);
+    }
+    // Handle last value
+    if (startPos < xLine.length() && j < _layers[0]) {
+        String valueStr = xLine.substring(startPos);
+        #if defined(USE_64_BIT_DOUBLE)
+        x[j++] = strtod(valueStr.c_str(), NULL);
+        #else
+        x[j++] = strtof(valueStr.c_str(), NULL);
+        #endif
+    }
+    
+    // Parse y values
+    int k = 0;
+    startPos = 0;
+    commaPos = yLine.indexOf(',');
+    while (commaPos >= 0 && k < _layers[_numberOfLayers - 1]) {
+        String valueStr = yLine.substring(startPos, commaPos);
+        #if defined(USE_64_BIT_DOUBLE)
+        y[k++] = strtod(valueStr.c_str(), NULL);
+        #else
+        y[k++] = strtof(valueStr.c_str(), NULL);
+        #endif
+        startPos = commaPos + 1;
+        commaPos = yLine.indexOf(',', startPos);
+    }
+    // Handle last value
+    if (startPos < yLine.length() && k < _layers[_numberOfLayers - 1]) {
+        String valueStr = yLine.substring(startPos);
+        #if defined(USE_64_BIT_DOUBLE)
+        y[k++] = strtod(valueStr.c_str(), NULL);
+        #else
+        y[k++] = strtof(valueStr.c_str(), NULL);
+        #endif
+    }
+
+    // is there a better way to do this? do we need to allocate on the heap? can we use a fixed size array and attach on the struct without the heap?
+    testData* td = new testData;
+    td->x = x;
+    td->y = y;
+    return td;
+    
+}
+
 // -------------- Unimplemeneted
 /*
 void receiveModelFromNetwork() {
@@ -528,11 +626,6 @@ void receiveModelFromNetwork() {
 void predictFromCurrentModel() {
 
 }
-
-void calculateMetricsFromModel() {
-
-}
-
 
 void readDataFromSensors() {
 
