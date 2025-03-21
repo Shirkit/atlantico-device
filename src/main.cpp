@@ -23,12 +23,14 @@ void printInstructions() {
   Serial.println("3. Save Model");
   Serial.println("4. Load Model");
   Serial.println("5. Send Model to Network");
+  Serial.println("6. Print Model Metrics");
   Serial.println("9. Delete Model");
   Serial.println("11. Print New Model");
   Serial.println("12. Train New Model");
   Serial.println("13. Save New Model");
   Serial.println("14. Load New Model");
   Serial.println("15. Send Model to Network");
+  Serial.println("16. Print New Model Metrics");
   Serial.println("19. Delete New Model");
   Serial.println("99. Print these Instructions");
 }
@@ -56,7 +58,10 @@ void loop()
       currentModel->print();
       break;
     case 2:
-      trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+      if (currentModelMetrics != NULL) {
+        delete currentModelMetrics;
+      }
+      currentModelMetrics = trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
       break;
     case 3:
       saveModelToFlash(*currentModel, MODEL_PATH);
@@ -68,8 +73,7 @@ void loop()
       sendModelToNetwork(*currentModel);
       break;
     case 6:
-      for (int i = 0; i < sizeof(_layers); i++) {
-      }
+      currentModelMetrics->print();
       break;
     case 9:
     {
@@ -80,7 +84,10 @@ void loop()
       newModel->print();
       break;
     case 12:
-      trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+      if (newModelMetrics != NULL) {
+        delete newModelMetrics;
+      }
+      newModelMetrics = trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
       break;
     case 13:
       saveModelToFlash(*newModel, NEW_MODEL_PATH);
@@ -90,6 +97,9 @@ void loop()
       break;
     case 15:
       sendModelToNetwork(*currentModel);
+      break;
+    case 16:
+      newModelMetrics->print();
       break;
     case 19:
       SPIFFS.exists(NEW_MODEL_PATH) ? SPIFFS.remove(NEW_MODEL_PATH) : Serial.println("Model not found");

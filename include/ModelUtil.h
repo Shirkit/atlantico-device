@@ -48,9 +48,120 @@ struct model {
     }
 };
 
+struct classClassifierMetricts {
+    unsigned int truePositives = 0;
+    unsigned int trueNegatives = 0;
+    unsigned int falsePositives = 0;
+    unsigned int falseNegatives = 0;
+
+    DFLOAT totalPredictions() {
+        return (DFLOAT) truePositives + trueNegatives + falsePositives + falseNegatives;
+    }
+
+    DFLOAT correctPredictions() {
+        return (DFLOAT) truePositives + trueNegatives;
+    }
+
+    DFLOAT accuracy() {
+        return (DFLOAT) correctPredictions() / totalPredictions();
+    }
+
+    DFLOAT precision() {
+        return (DFLOAT) truePositives / (truePositives + falsePositives);
+    }
+
+    DFLOAT recall() {
+        return (DFLOAT) truePositives / (truePositives + falseNegatives);
+    }
+
+    DFLOAT f1Score() {
+        return (DFLOAT) 2 * (precision() * recall()) / (precision() + recall());
+    }
+};
+
+struct multiClassClassifierMetrics {
+    classClassifierMetricts* metrics;
+    unsigned int numberOfClasses;
+    DFLOAT meanSqrdError;
+
+    DFLOAT accuracy() {
+        DFLOAT sum = 0;
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            sum += metrics[i].accuracy();
+        }
+        return sum / numberOfClasses;
+    }
+
+    DFLOAT precision() {
+        DFLOAT sum = 0;
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            sum += metrics[i].precision();
+        }
+        return sum / numberOfClasses;
+    }
+
+    DFLOAT recall() {
+        DFLOAT sum = 0;
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            sum += metrics[i].recall();
+        }
+        return sum / numberOfClasses;
+    }
+
+    DFLOAT f1Score() {
+        DFLOAT sum = 0;
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            sum += metrics[i].f1Score();
+        }
+        return sum / numberOfClasses;
+    }
+
+    void print() {
+        Serial.println("Metrics:");
+        Serial.print("Mean Squared Error: ");
+        Serial.println(meanSqrdError);
+        Serial.print("Accuracy: ");
+        Serial.println(accuracy());
+        Serial.print("Precision: ");
+        Serial.println(precision());
+        Serial.print("Recall: ");
+        Serial.println(recall());
+        Serial.print("F1 Score: ");
+        Serial.println(f1Score());
+        Serial.println("Class Metrics:");
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            Serial.print("Class ");
+            Serial.print(i);
+            Serial.println(":");
+            Serial.print("True Positives: ");
+            Serial.println(metrics[i].truePositives);
+            Serial.print("True Negatives: ");
+            Serial.println(metrics[i].trueNegatives);
+            Serial.print("False Positives: ");
+            Serial.println(metrics[i].falsePositives);
+            Serial.print("False Negatives: ");
+            Serial.println(metrics[i].falseNegatives);
+            Serial.print("Accuracy: ");
+            Serial.println(metrics[i].accuracy());
+            Serial.print("Precision: ");
+            Serial.println(metrics[i].precision());
+            Serial.print("Recall: ");
+            Serial.println(metrics[i].recall());
+            Serial.print("F1 Score: ");
+            Serial.println(metrics[i].f1Score());
+        }
+    }
+
+    ~multiClassClassifierMetrics() {
+        delete[] metrics;
+    }
+};
+
 bool trainNewModel = false;
 NeuralNetwork* newModel = NULL;
 NeuralNetwork* currentModel = NULL;
+multiClassClassifierMetrics* currentModelMetrics = NULL;
+multiClassClassifierMetrics* newModelMetrics = NULL;
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions);
 
@@ -62,7 +173,7 @@ NeuralNetwork* loadModelFromFlash(const String& file);
 
 model* transformDataToModel(Stream& stream);
 
-bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file);
+multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file);
 
 void processMessages();
 

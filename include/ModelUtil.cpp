@@ -34,7 +34,7 @@ bool ensureConnected() {
     return true;
   }
 
-  bool publishWithRetry(const char* topic, const char* payload, int retries = 3) {
+bool publishWithRetry(const char* topic, const char* payload, int retries = 3) {
     for (int i = 0; i < retries; i++) {
       if (_client.publish(topic, payload)) {
         return true;
@@ -108,7 +108,10 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
             _learningRateOfWeights = currentModel->LearningRateOfWeights;
         currentModel->LearningRateOfBiases = _learningRateOfBiases;
         currentModel->LearningRateOfWeights = _learningRateOfWeights;
-        trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+        if (currentModelMetrics != NULL) {
+            delete currentModelMetrics;
+        }
+        currentModelMetrics = trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
     }
 
     setupMQTT();
@@ -212,20 +215,24 @@ model* transformDataToModel(Stream& stream) {
     return m;
 }
 
-bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
+multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
     Serial.println("Training model from original dataset...");
     File xFile = SPIFFS.open(x_file, "r");
     File yFile = SPIFFS.open(y_file, "r");
 
     if (!xFile || !yFile) {
         Serial.println("Error opening file");
-        return false;
+        return NULL;
     }
 
     // Dynamic buffer allocation
     String xLine, yLine;
     // TODO mover para o heap caso estoure a memória
     DFLOAT x[NN.layers[0]._numberOfInputs], y[NN.layers[NN.numberOflayers - 1]._numberOfOutputs];
+
+    multiClassClassifierMetrics* metrics = new multiClassClassifierMetrics;
+    metrics->numberOfClasses = NN.layers[NN.numberOflayers - 1]._numberOfOutputs;
+    metrics->metrics = new classClassifierMetricts[metrics->numberOfClasses];
 
     for (int t = 0; t < EPOCHS; t++) {
         Serial.println("Epoch: " + String(t + 1));
@@ -289,18 +296,37 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
             }
             
             // Train model
-            NN.FeedForward(x);
+            DFLOAT* predictions = NN.FeedForward(x);
             NN.BackProp(y);
-            NN.getMeanSqrdError(1);
+            metrics->meanSqrdError = NN.getMeanSqrdError(1);
+
+            // Calculate metrics
+            for (int i = 0; i < metrics->numberOfClasses; i++) {
+                if (y[i] == 1) {
+                    if (predictions[i] >= 0.5) {
+                        metrics->metrics[i].truePositives++;
+                    } else {
+                        metrics->metrics[i].falseNegatives++;
+                    }
+                } else {
+                    if (predictions[i] >= 0.5) {
+                        metrics->metrics[i].falsePositives++;
+                    } else {
+                        metrics->metrics[i].trueNegatives++;
+                    }
+                }
+            }
+            
+
         }
         
         yFile.seek(0);
         xFile.seek(0);
     }
-    
+
     xFile.close();
     yFile.close();
-    return true;
+    return metrics;
 }
 
 void processMessages() {
