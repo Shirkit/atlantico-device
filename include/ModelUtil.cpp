@@ -18,6 +18,7 @@ int _numberOfLayers;
 byte* _actvFunctions;
 DFLOAT _learningRateOfWeights;
 DFLOAT _learningRateOfBiases;
+model *tempModel;
 // TODO Write into file while receiving the payload to avoid using too much memory.
 // String _clientName;
 
@@ -48,9 +49,15 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
 }
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, DFLOAT learningRateOfWeights, DFLOAT learningRateOfBiases) {
-    _layers = layers;
+    _layers = new unsigned int[numberOfLayers];
+    for (unsigned int i = 0; i < numberOfLayers; i++) {
+        _layers[i] = layers[i];
+    }
+    _actvFunctions = new byte[numberOfLayers];
+    for (unsigned int i = 0; i < numberOfLayers; i++) {
+        _actvFunctions[i] = actvFunctions[i];
+    }
     _numberOfLayers = numberOfLayers;
-    _actvFunctions = actvFunctions;
     _learningRateOfWeights = learningRateOfWeights;
     _learningRateOfBiases = learningRateOfBiases;
     // _clientName = clientName;
@@ -136,7 +143,7 @@ NeuralNetwork* loadModelFromFlash(const String& file) {
     }
 }
 
-model transformDataToModel(Stream& stream) {
+model* transformDataToModel(Stream& stream) {
     Serial.println("Transforming data to model...");
     // TODO o tamanho padrão pode ser pequeno demais para caber todos os pesos e biases
     JsonDocument doc;
@@ -148,25 +155,24 @@ model transformDataToModel(Stream& stream) {
     if (result != DeserializationError::Ok) {
         Serial.println(result.code());
         Serial.println("JSON failed to deserialize");
-        return { NULL, NULL };
+        return NULL;
     }
     const char* precision = doc["precision"];
 #if defined(USE_64_BIT_DOUBLE)
     if (strcmp(precision, "double") != 0) {
         // error loading the model, precision missmatch
-        return { NULL, NULL };
+        return NULL;
     }
 #else
     if (strcmp(precision, "float") != 0) {
         // error loading the model, precision missmatch
-        return { NULL, NULL, 0, 0 };
+        return NULL;
     }
 #endif
     JsonArray biases = doc["biases"];
     JsonArray weights = doc["weights"];
     DFLOAT* bias = new DFLOAT[biases.size()];
     DFLOAT* weight = new DFLOAT[weights.size()];
-    // ! this will leak memory
 
     for (int i = 0; i < biases.size(); i++) {
 #if defined(USE_64_BIT_DOUBLE)
@@ -200,7 +206,10 @@ model transformDataToModel(Stream& stream) {
     }
 
     Serial.println();
-    return { bias, weight };
+    model *m = new model;
+    m->biases = bias;
+    m->weights = weight;
+    return m;
 }
 
 bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
@@ -216,7 +225,7 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
     // Dynamic buffer allocation
     String xLine, yLine;
     // TODO mover para o heap caso estoure a memória
-    DFLOAT x[_layers[0]], y[_layers[_numberOfLayers - 1]];
+    DFLOAT x[NN.layers[0]._numberOfInputs], y[NN.layers[NN.numberOflayers - 1]._numberOfOutputs];
 
     for (int t = 0; t < EPOCHS; t++) {
         Serial.println("Epoch: " + String(t + 1));
@@ -235,7 +244,7 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
             int j = 0;
             int startPos = 0;
             int commaPos = xLine.indexOf(',');
-            while (commaPos >= 0 && j < _layers[0]) {
+            while (commaPos >= 0 && j < NN.layers[0]._numberOfInputs) {
                 String valueStr = xLine.substring(startPos, commaPos);
                 #if defined(USE_64_BIT_DOUBLE)
                 x[j++] = strtod(valueStr.c_str(), NULL);
@@ -246,7 +255,7 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
                 commaPos = xLine.indexOf(',', startPos);
             }
             // Handle last value
-            if (startPos < xLine.length() && j < _layers[0]) {
+            if (startPos < xLine.length() && j < NN.layers[0]._numberOfInputs) {
                 String valueStr = xLine.substring(startPos);
                 #if defined(USE_64_BIT_DOUBLE)
                 x[j++] = strtod(valueStr.c_str(), NULL);
@@ -259,7 +268,7 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
             int k = 0;
             startPos = 0;
             commaPos = yLine.indexOf(',');
-            while (commaPos >= 0 && k < _layers[_numberOfLayers - 1]) {
+            while (commaPos >= 0 && k < NN.layers[NN.numberOflayers - 1]._numberOfOutputs) {
                 String valueStr = yLine.substring(startPos, commaPos);
                 #if defined(USE_64_BIT_DOUBLE)
                 y[k++] = strtod(valueStr.c_str(), NULL);
@@ -270,7 +279,7 @@ bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, cons
                 commaPos = yLine.indexOf(',', startPos);
             }
             // Handle last value
-            if (startPos < yLine.length() && k < _layers[_numberOfLayers - 1]) {
+            if (startPos < yLine.length() && k < NN.layers[NN.numberOflayers - 1]._numberOfOutputs) {
                 String valueStr = yLine.substring(startPos);
                 #if defined(USE_64_BIT_DOUBLE)
                 y[k++] = strtod(valueStr.c_str(), NULL);
@@ -342,33 +351,36 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             if (!SPIFFS.exists("/temp")) {
                 SPIFFS.mkdir("/temp");
             }
-            if (SPIFFS.exists("/temp/new_model.nn")) {
-                SPIFFS.remove("/temp/new_model.nn");
+            if (SPIFFS.exists("/temp/new_model.json")) {
+                SPIFFS.remove("/temp/new_model.json");
             }
             incomingPayload.clear();
         }
         else if (String((char*)payload).startsWith("FIM_TRANSMISSAO")) {
+            model* mm = NULL;
             Serial.println("Ending transmission...");
-            model m;
             if (false) {
-                File tempFile = SPIFFS.open("/temp_model.json", "r");
+                File tempFile = SPIFFS.open("/temp/new_model.json", "r");
                 if (!tempFile) {
                     Serial.println("Error opening temp file");
                     return;
                 }
-                m = transformDataToModel(tempFile);
+                mm = transformDataToModel(tempFile);
+                tempFile.close();
             }
             else {
-                m = transformDataToModel(incomingPayload);
+                mm = transformDataToModel(incomingPayload);
             }
-            if (m.biases != NULL && m.weights != NULL) {
-                Serial.println("Model parsed successfully...");
+            if (mm != NULL && mm->biases != NULL && mm->weights != NULL) {
+                if (tempModel != NULL) {
+                    delete tempModel;
+                }
                 if (newModel != NULL) {
                     delete newModel;
                 }
-                newModel = new NeuralNetwork(_layers, m.weights, m.biases, _numberOfLayers, _actvFunctions);
-                // TODO remember to not free m.weights and m.biases if isAllocdWithNew is false
-                // ! this will leak memory if not freed
+                tempModel = mm;
+                Serial.println("Model parsed successfully...");
+                newModel = new NeuralNetwork(_layers, tempModel->weights, tempModel->biases, _numberOfLayers, _actvFunctions);
                 newModel->LearningRateOfBiases = _learningRateOfBiases;
                 newModel->LearningRateOfWeights = _learningRateOfWeights;
                 trainNewModel = true;
@@ -377,7 +389,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         else {
             // TODO should write into buffer file instead of storing all in memory to avoid issues with big files being received
             Serial.println("Payload received...");
-            File ttt = SPIFFS.open("/temp/new_model.nn", "a");
+            File ttt = SPIFFS.open("/temp/new_model.json", "a");
             ttt.write(payload, length);
             ttt.close();
             incomingPayload.concat((char*)payload, length);

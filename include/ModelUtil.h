@@ -42,6 +42,10 @@
 struct model {
     DFLOAT *biases;
     DFLOAT *weights;
+    ~model() {
+        delete[] biases;
+        delete[] weights;
+    }
 };
 
 bool trainNewModel = false;
@@ -56,7 +60,7 @@ bool saveModelToFlash(NeuralNetwork& NN, const String file);
 
 NeuralNetwork* loadModelFromFlash(const String& file);
 
-model transformDataToModel(Stream& stream);
+model* transformDataToModel(Stream& stream);
 
 bool trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file);
 

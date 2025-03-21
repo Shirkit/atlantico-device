@@ -16,9 +16,6 @@
 //#include <SPIFFS.h>
 #include "ModelUtil.cpp"
 
-unsigned int layers[] = { 20, 16, 8, 6 };
-byte Actv_Functions[] = { 0, 0, 1 };
-
 void printInstructions() {
   Serial.println("Choose an option to coninue:");
   Serial.println("1. Print Model");
@@ -40,6 +37,8 @@ void setup()
 {
   Serial.begin(115200);
   randomSeed(10);
+  unsigned int layers[] = { 20, 16, 8, 6 };
+  byte Actv_Functions[] = { 0, 0, 1 };
   bootUp(layers, NumberOf(layers), Actv_Functions, 0, 0);
   printInstructions();
 }
@@ -69,7 +68,7 @@ void loop()
       sendModelToNetwork(*currentModel);
       break;
     case 6:
-      for (int i = 0; i < sizeof(layers); i++) {
+      for (int i = 0; i < sizeof(_layers); i++) {
       }
       break;
     case 9:
