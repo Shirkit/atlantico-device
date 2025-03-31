@@ -2,23 +2,22 @@
 
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
-#include <PubSubClient.h>
+// #include <PubSubClient.h>
+#include <PicoMQTT.h>
 #include <WiFi.h>
-#include "StreamString.h"
-#include <StreamUtils.h>
 
 // -------------- Variables
 
 WiFiClient __espClient;
-PubSubClient _client(__espClient);
+PicoMQTT::Client mqtt(MQTT_BROKER, 1883);
 
-StreamString incomingPayload = StreamString();
+// StreamString incomingPayload = StreamString();
 unsigned int* _layers;
 int _numberOfLayers;
 byte* _actvFunctions;
 DFLOAT _learningRateOfWeights;
 DFLOAT _learningRateOfBiases;
-model *tempModel;
+model* tempModel;
 
 File xTest, yTest;
 // TODO Write into file while receiving the payload to avoid using too much memory.
@@ -26,25 +25,44 @@ File xTest, yTest;
 
 // -------------- Interface functions
 
+// #if DEBUG
+
+unsigned long previousMillis = 0;
+
+void printTiming(bool doReset = false) {
+    if (doReset || previousMillis == 0) {
+        previousMillis = millis();
+    }
+    else {
+        unsigned long currentMillis = millis();
+        D_print("Time elapsed: ");
+        D_print(((float)currentMillis - previousMillis) / 1000.0, 1);
+        D_println(" seconds (" + String(currentMillis - previousMillis) + " ms)");
+        previousMillis = 0;
+    }
+}
+
+// #endif
+
 bool ensureConnected() {
     if (!WiFi.isConnected()) {
-      return connectToWifi(false);
+        return connectToWifi(false);
     }
-    if (!_client.connected()) {
-      return connectToServerMQTT(false);
+    if (!mqtt.connected()) {
+        return connectToServerMQTT();
     }
     return true;
-  }
+}
 
-bool publishWithRetry(const char* topic, const char* payload, int retries = 3) {
+/*bool publishWithRetry(const char* topic, const char* payload, int retries = 3) {
     for (int i = 0; i < retries; i++) {
-      if (_client.publish(topic, payload)) {
-        return true;
-      }
-      delay(100);
+        if (_client.publish(topic, payload)) {
+            return true;
+        }
+        delay(100);
     }
     return false;
-  }
+  }*/
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions) {
     bootUp(layers, numberOfLayers, actvFunctions, 0, 0);
@@ -64,10 +82,10 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
     _learningRateOfBiases = learningRateOfBiases;
     // _clientName = clientName;
 
-    Serial.println("Booting up...");
+    D_println("Booting up...");
 
     if (!SPIFFS.begin(false)) {
-        Serial.println("Error mounting SPIFFS");
+        D_println("Error mounting SPIFFS");
         // SPIFFS not able to intialize the partition, cannot load from flash and naither save to it later
         return;
     }
@@ -77,7 +95,8 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
             delete currentModel;
         }
         currentModel = loadModelFromFlash(MODEL_PATH);
-    } else {
+    }
+    else {
         // load layer structure (input, hidden_1, hidden_2, hidden_x, output) and activation functions (ReLU, Softmax etc)
         if (currentModel != NULL) {
             delete currentModel;
@@ -120,49 +139,57 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
     yTest = SPIFFS.open(Y_TEST_PATH, "r");
 
     setupMQTT();
+
+    D_println("Done booting.");
 }
 
 bool saveModelToFlash(NeuralNetwork& NN, const String file) {
-    Serial.println("Saving model to flash...");
+    D_println("Saving model to flash...");
     File modelFile = SPIFFS.open(file, "w");
     bool result;
     if (!modelFile) {
         // Error opening file
         result = false;
-    } else {
+    }
+    else {
         result = NN.save(modelFile);
     }
-    Serial.println("Result: " + String(result));
+    D_println("Result: " + String(result));
     modelFile.close();
     return result;
 }
 
 NeuralNetwork* loadModelFromFlash(const String& file) {
-    Serial.println("Loading model from flash...");
+    D_println("Loading model from flash...");
     File modelFile = SPIFFS.open(file, "r");
     if (!modelFile) {
         // Error opening file
-        Serial.println("Error opening file");
+        D_println("Error opening file");
         return NULL;
-    } else {
+    }
+    else {
         NeuralNetwork* r = new NeuralNetwork(modelFile);
         modelFile.close();
+        D_println("Model loaded successfully");
         return r;
     }
 }
 
 model* transformDataToModel(Stream& stream) {
-    Serial.println("Transforming data to model...");
+    D_println("Transforming data to model...");
+    printTiming(true);
     // TODO o tamanho padrão pode ser pequeno demais para caber todos os pesos e biases
     JsonDocument doc;
-    
-    ReadLoggingStream loggingStream(stream, Serial);
-    DeserializationError result = deserializeJson(doc, loggingStream);
+
+    D_println(stream.available());
+
+    // ReadLoggingStream loggingStream(stream, Serial);
+    DeserializationError result = deserializeJson(doc, stream);
 
     // DeserializationError result = deserializeJson(doc, stream);
     if (result != DeserializationError::Ok) {
-        Serial.println(result.code());
-        Serial.println("JSON failed to deserialize");
+        D_println(result.code());
+        D_println("JSON failed to deserialize");
         return NULL;
     }
     const char* precision = doc["precision"];
@@ -194,9 +221,6 @@ model* transformDataToModel(Stream& stream) {
 #else
         bias[i] = biases[i].as<DFLOAT>();
 #endif
-        Serial.print(i);
-        Serial.print(":");
-        Serial.println(bias[i], 8);  // Print with high precision
     }
 
     for (int i = 0; i < weights.size(); i++) {
@@ -213,20 +237,22 @@ model* transformDataToModel(Stream& stream) {
 #endif
     }
 
-    Serial.println();
-    model *m = new model;
+    model* m = new model;
     m->biases = bias;
     m->weights = weight;
+    printTiming();
+    D_println("Transformation complete.");
     return m;
 }
 
 multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
-    Serial.println("Training model from original dataset...");
+    D_println("Training model from original dataset...");
+    printTiming(true);
     File xFile = SPIFFS.open(x_file, "r");
     File yFile = SPIFFS.open(y_file, "r");
 
     if (!xFile || !yFile) {
-        Serial.println("Error opening file");
+        D_println("Error opening file");
         return NULL;
     }
 
@@ -240,18 +266,18 @@ multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, co
     metrics->metrics = new classClassifierMetricts[metrics->numberOfClasses];
 
     for (int t = 0; t < EPOCHS; t++) {
-        Serial.println("Epoch: " + String(t + 1));
-        
+        D_println("Epoch: " + String(t + 1));
+
         // Read from file
         while (xFile.available() && yFile.available()) {
             // Read full lines using String which handles dynamic memory
             xLine = xFile.readStringUntil('\n');
             yLine = yFile.readStringUntil('\n');
-            
+
             if (xLine.length() == 0 || yLine.length() == 0) {
                 break;
             }
-            
+
             // Parse x values
             int j = 0;
             int startPos = 0;
@@ -275,7 +301,7 @@ multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, co
                 x[j++] = strtof(valueStr.c_str(), NULL);
                 #endif
             }
-            
+
             // Parse y values
             int k = 0;
             startPos = 0;
@@ -299,7 +325,7 @@ multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, co
                 y[k++] = strtof(valueStr.c_str(), NULL);
                 #endif
             }
-            
+
             // Train model
             DFLOAT* predictions = NN.FeedForward(x);
             NN.BackProp(y);
@@ -310,52 +336,80 @@ multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, co
                 if (y[i] == 1) {
                     if (predictions[i] >= 0.5) {
                         metrics->metrics[i].truePositives++;
-                    } else {
+                    }
+                    else {
                         metrics->metrics[i].falseNegatives++;
                     }
-                } else {
+                }
+                else {
                     if (predictions[i] >= 0.5) {
                         metrics->metrics[i].falsePositives++;
-                    } else {
+                    }
+                    else {
                         metrics->metrics[i].trueNegatives++;
                     }
                 }
             }
-            
+
 
         }
-        
+
         yFile.seek(0);
         xFile.seek(0);
     }
 
     xFile.close();
     yFile.close();
+    printTiming();
+    D_println("Training complete.");
     return metrics;
 }
 
 void processMessages() {
-    _client.loop();
+    //_client.loop();
+    mqtt.loop();
 }
 
 
 // -------------- Local functions
 
 void setupMQTT() {
-    Serial.println("Setting up MQTT...");
-    _client.setServer(MQTT_BROKER, 1883);
-    _client.setCallback(mqttCallback);
+    D_println("Setting up MQTT...");
     connectToWifi(true);
-    connectToServerMQTT(true);
+    mqtt.client_id = CLIENT_NAME;
+    mqtt.host = MQTT_BROKER;
+    mqtt.port = 1883;
+    connectToServerMQTT();
+
+    mqtt.subscribe(MQTT_TOPIC, [](const char * topic, Stream & stream) {
+        model* mm = transformDataToModel(stream);
+        if (mm != NULL && mm->biases != NULL && mm->weights != NULL) {
+            if (tempModel != NULL) {
+                delete tempModel;
+            }
+            if (newModel != NULL) {
+                delete newModel;
+            }
+            tempModel = mm;
+            D_println("Model parsed successfully...");
+            newModel = new NeuralNetwork(_layers, tempModel->weights, tempModel->biases, _numberOfLayers, _actvFunctions);
+            newModel->LearningRateOfBiases = _learningRateOfBiases;
+            newModel->LearningRateOfWeights = _learningRateOfWeights;
+            trainNewModel = true;
+        } 
+        else {
+            D_println("Error parsing model");
+        }
+    });
 }
 
 bool connectToWifi(bool forever) {
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("Already connected to Wifi");
+        D_println("Already connected to Wifi");
         return true;
     }
     else {
-        Serial.println("Connecting to wifi...");
+        D_println("Connecting to wifi...");
         WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         unsigned long startTime = millis();
         unsigned long timeout = CONNECTION_TIMEOUT; // 30 second timeout
@@ -363,97 +417,17 @@ bool connectToWifi(bool forever) {
             delay(500);
         }
         if (WiFi.status() == WL_CONNECTED) {
-            Serial.println("Wifi connected");
-            Serial.println("IP address: " + WiFi.localIP().toString());
+            D_println("Wifi connected");
+            D_println("IP address: " + WiFi.localIP().toString());
             return true;
         }
-        Serial.println("Failed to connect to Wifi");
+        D_println("Failed to connect to Wifi");
         return false;
     }
 }
 
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-    // TODO pode enfrentar race issues se receber múltiplas mensagens, fora se receber fora de ordem entre outros problemas
-    // handle incoming messages
-
-    if (strcmp(topic, MQTT_TOPIC) == 0) {
-        if (String((char*)payload).startsWith("INICIO_TRANSMISSAO")) {
-            Serial.println("Starting transmission...");
-            if (!SPIFFS.exists("/temp")) {
-                SPIFFS.mkdir("/temp");
-            }
-            if (SPIFFS.exists("/temp/new_model.json")) {
-                SPIFFS.remove("/temp/new_model.json");
-            }
-            incomingPayload.clear();
-        }
-        else if (String((char*)payload).startsWith("FIM_TRANSMISSAO")) {
-            model* mm = NULL;
-            Serial.println("Ending transmission...");
-            if (false) {
-                File tempFile = SPIFFS.open("/temp/new_model.json", "r");
-                if (!tempFile) {
-                    Serial.println("Error opening temp file");
-                    return;
-                }
-                mm = transformDataToModel(tempFile);
-                tempFile.close();
-            }
-            else {
-                mm = transformDataToModel(incomingPayload);
-            }
-            if (mm != NULL && mm->biases != NULL && mm->weights != NULL) {
-                if (tempModel != NULL) {
-                    delete tempModel;
-                }
-                if (newModel != NULL) {
-                    delete newModel;
-                }
-                tempModel = mm;
-                Serial.println("Model parsed successfully...");
-                newModel = new NeuralNetwork(_layers, tempModel->weights, tempModel->biases, _numberOfLayers, _actvFunctions);
-                newModel->LearningRateOfBiases = _learningRateOfBiases;
-                newModel->LearningRateOfWeights = _learningRateOfWeights;
-                trainNewModel = true;
-            }
-        }
-        else {
-            // TODO should write into buffer file instead of storing all in memory to avoid issues with big files being received
-            Serial.println("Payload received...");
-            File ttt = SPIFFS.open("/temp/new_model.json", "a");
-            ttt.write(payload, length);
-            ttt.close();
-            incomingPayload.concat((char*)payload, length);
-        }
-    }
-}
-
-bool connectToServerMQTT(bool forever) {
-    if (_client.connected()) {
-        Serial.println("Already connected to server MQTT");
-        return true;
-    }
-    else {
-        Serial.println("Connecting to server MQTT...");
-        unsigned long startTime = millis();
-        unsigned long timeout = CONNECTION_TIMEOUT; // 30 second timeout
-        while (!_client.connected() && (forever || millis() - startTime < timeout)) {
-            // Use a unique client ID with timestamp to avoid connection conflicts
-            String clientId = CLIENT_NAME;
-            clientId += String(millis());
-
-            if (_client.connect(clientId.c_str())) {
-                _client.subscribe(MQTT_TOPIC);
-                Serial.println("Connected to server MQTT");
-                return true;
-            }
-
-            Serial.println("Failed to connect, retrying in 2 seconds...");
-            delay(2000);
-        }
-        Serial.println("Failed to connect to server MQTT");
-        return false;
-    }
+bool connectToServerMQTT() {
+    return mqtt.connect(MQTT_BROKER, 1883, CLIENT_NAME);
 }
 
 void sendModelToNetwork(NeuralNetwork& NN) {
@@ -462,11 +436,9 @@ void sendModelToNetwork(NeuralNetwork& NN) {
         return;
     }
 
-    Serial.println("Sending model to the network...");
+    D_println("Sending model to the network...");
+    printTiming(true);
 
-    publishWithRetry(MQTT_TOPIC, "INICIO_TRANSMISSAO");
-
-    delay(100);
     // TODO o tamanho padrão pode ser pequeno demais para caber todos os pesos e biases
     JsonDocument doc;
 
@@ -496,30 +468,14 @@ void sendModelToNetwork(NeuralNetwork& NN) {
         }
     }
 
-    StreamString stream = StreamString();
-    size_t len = serializeJson(doc, stream);
+    auto publish = mqtt.begin_publish(MQTT_TOPIC, measureJson(doc));
+    serializeJson(doc, publish);
+    publish.send();
 
-    char buffer[MQTT_MESSAGE_SIZE];
-    size_t bytesRemaining = len;
-    size_t currentPosition = 0;
+    printTiming();
+    D_println("Model sent to the network...");
 
-    while (bytesRemaining > 0) {
-        size_t bytesToRead = min((size_t)MQTT_MESSAGE_SIZE - 1, bytesRemaining);
-        size_t bytes_read = stream.readBytes(buffer, bytesToRead);
-        buffer[bytes_read] = '\0';
-
-        publishWithRetry(MQTT_TOPIC, buffer);
-
-        bytesRemaining -= bytes_read;
-        currentPosition += bytes_read;
-
-        delay(100);
-    }
-
-    Serial.println("Model sent to the network...");
-    publishWithRetry(MQTT_TOPIC, "FIM_TRANSMISSAO");
-
-    //    Serial.println(stream);
+    //    D_println(stream);
 }
 
 DFLOAT* predictFromCurrentModel(DFLOAT* x) {
@@ -528,11 +484,11 @@ DFLOAT* predictFromCurrentModel(DFLOAT* x) {
 
 testData* readTestData() {
     if (!xTest) {
-        Serial.println("Error opening file");
+        D_println("Error opening file");
         return NULL;
     }
     if (!yTest) {
-        Serial.println("Error opening file");
+        D_println("Error opening file");
         return NULL;
     }
 
@@ -543,7 +499,7 @@ testData* readTestData() {
 
     String xLine = xTest.readStringUntil('\n');
     String yLine = yTest.readStringUntil('\n');
-    
+
     if (xLine.length() == 0 || yLine.length() == 0) {
         xTest.seek(0);
         yTest.seek(0);
@@ -551,17 +507,17 @@ testData* readTestData() {
         yLine = yTest.readStringUntil('\n');
         if (xLine.length() == 0 || yLine.length() == 0) {
             // can't recover from this error
-            Serial.println("Error reading test file");
+            D_println("Error reading test file");
             return NULL;
         }
     }
-    
+
     int j = 0;
     int startPos = 0;
     int commaPos = xLine.indexOf(',');
 
     // is there a better way to do this? do we need to allocate on the heap? can we use a fixed size array and attach on the struct without the heap?
-    DFLOAT *x = new DFLOAT[_layers[0]], *y = new DFLOAT[_layers[_numberOfLayers - 1]];
+    DFLOAT* x = new DFLOAT[_layers[0]], * y = new DFLOAT[_layers[_numberOfLayers - 1]];
 
     while (commaPos >= 0 && j < _layers[0]) {
         String valueStr = xLine.substring(startPos, commaPos);
@@ -582,7 +538,7 @@ testData* readTestData() {
         x[j++] = strtof(valueStr.c_str(), NULL);
         #endif
     }
-    
+
     // Parse y values
     int k = 0;
     startPos = 0;
@@ -612,7 +568,7 @@ testData* readTestData() {
     td->x = x;
     td->y = y;
     return td;
-    
+
 }
 
 // -------------- Unimplemeneted

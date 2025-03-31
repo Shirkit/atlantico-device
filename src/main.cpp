@@ -3,6 +3,24 @@
 #define _1_OPTIMIZE 0B00000001 // USE_64_BIT_DOUBLE
 #define _2_OPTIMIZE 0B00100000 // MULTIPLE_BIASES_PER_LAYER
 
+#define DEBUG 1    // SET TO 0 OUT TO REMOVE TRACES
+
+#if DEBUG
+#define D_SerialBegin(...) Serial.begin(__VA_ARGS__);
+#define D_print(...)    Serial.print(__VA_ARGS__)
+#define D_write(...)    Serial.write(__VA_ARGS__)
+#define D_println(...)  Serial.println(__VA_ARGS__)
+#define D_printf(...)   Serial.printf(__VA_ARGS__)
+#define printTiming(...)   printTiming(__VA_ARGS__)
+#else
+#define D_SerialBegin(...)
+#define D_print(...)
+#define D_write(...)
+#define D_println(...)
+#define printTiming(...)
+#define D_printf(...)
+#endif
+
 #define ACTIVATION__PER_LAYER // DEFAULT KEYWORD for allowing the use of any Activation-Function per "Layer-to-Layer".
 // #define Sigmoid
 // #define Tanh
