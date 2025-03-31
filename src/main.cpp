@@ -42,6 +42,7 @@ void printInstructions() {
   Serial.println("4. Load Model");
   Serial.println("5. Send Model to Network");
   Serial.println("6. Print Model Metrics");
+  Serial.println("7. Read test Data and Predict from Current Model");
   Serial.println("9. Delete Model");
   Serial.println("11. Print New Model");
   Serial.println("12. Train New Model");
@@ -93,6 +94,24 @@ void loop()
     case 6:
       currentModelMetrics->print();
       break;
+    case 7: {
+      testData* test = readTestData();
+      if (test != NULL) {
+        DFLOAT* prediction = predictFromCurrentModel(test->x);
+        Serial.print("Prediction: ");
+        bool correct = true;
+        for (int j = 0; j < currentModel->layers[currentModel->numberOflayers - 1]._numberOfOutputs; j++) {
+          Serial.print(prediction[j], 0);
+          Serial.print("=");
+          Serial.print(test->y[j], 0);
+          if (j < currentModel->layers[currentModel->numberOflayers - 1]._numberOfOutputs - 1) {
+            Serial.print(" - ");
+          }
+        }
+        Serial.println();
+      }
+      break;
+    }
     case 9:
     {
       SPIFFS.exists(MODEL_PATH) ? SPIFFS.remove(MODEL_PATH) : Serial.println("Model not found");

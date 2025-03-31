@@ -19,6 +19,13 @@ novos dados dos sensores implicam em dados não normalizados sendo escritos no d
 - ou então pega o próprio dataset para simular as entradas
     - tipo, pega aleatoriamente uma linha para simular o input
 
+Cálculo de tempos:
+- para transmissão do modelo no device (tempo mínimo, e com um delay artificial)
+- quanto tempo leva o servidor para transmitir para o device
+- quanto tempo leva para treinar
+    - tempo de treinamento por registro
+
+
 ==========
 
 definir qual vai ser o padrão que vai receber do dataset

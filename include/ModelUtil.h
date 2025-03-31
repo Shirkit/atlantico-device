@@ -28,7 +28,7 @@
 #define WIFI_PASSWORD "456123789a"
 #define MQTT_BROKER "192.168.15.13"
 #define CLIENT_NAME "esp01"
-#define MQTT_MESSAGE_SIZE 200
+// #define MQTT_MESSAGE_SIZE 500
 #define CONNECTION_TIMEOUT 30000 // in miliseconds
 
 /**
@@ -198,7 +198,7 @@ testData* readTestData();
 
 void setupMQTT();
 bool connectToWifi(bool forever = true);
-void mqttCallback(char* topic, byte* payload, unsigned int length);
-bool connectToServerMQTT(bool forever = true);
+// void mqttCallback(char* topic, byte* payload, unsigned int length);
+bool connectToServerMQTT();
 
 #endif /* MODELUTIL_H_ */
