@@ -2,7 +2,6 @@
 
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
-// #include <PubSubClient.h>
 #include <PicoMQTT.h>
 #include <WiFi.h>
 
@@ -11,7 +10,6 @@
 WiFiClient __espClient;
 PicoMQTT::Client mqtt(MQTT_BROKER, 1883);
 
-// StreamString incomingPayload = StreamString();
 unsigned int* _layers;
 int _numberOfLayers;
 byte* _actvFunctions;
@@ -21,7 +19,6 @@ model* tempModel;
 
 File xTest, yTest;
 // TODO Write into file while receiving the payload to avoid using too much memory.
-// String _clientName;
 
 // -------------- Interface functions
 
@@ -53,16 +50,6 @@ bool ensureConnected() {
     }
     return true;
 }
-
-/*bool publishWithRetry(const char* topic, const char* payload, int retries = 3) {
-    for (int i = 0; i < retries; i++) {
-        if (_client.publish(topic, payload)) {
-            return true;
-        }
-        delay(100);
-    }
-    return false;
-  }*/
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions) {
     bootUp(layers, numberOfLayers, actvFunctions, 0, 0);
@@ -474,8 +461,6 @@ void sendModelToNetwork(NeuralNetwork& NN) {
 
     printTiming();
     D_println("Model sent to the network...");
-
-    //    D_println(stream);
 }
 
 DFLOAT* predictFromCurrentModel(DFLOAT* x) {
