@@ -5,6 +5,7 @@
 
 #define DEBUG 1    // SET TO 0 OUT TO REMOVE TRACES
 
+#define PARALLEL
 #define ACTIVATION__PER_LAYER // DEFAULT KEYWORD for allowing the use of any Activation-Function per "Layer-to-Layer".
 // #define Sigmoid
 // #define Tanh
@@ -38,6 +39,13 @@ void printInstructions() {
   Serial.println("99. Print these Instructions");
 }
 
+void processIncomingMessages(void *pvParameters) {
+  while (true) {
+    processMessages();
+    delay(100); // Avoids blocking the loop
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -46,10 +54,49 @@ void setup()
   byte Actv_Functions[] = { 0, 0, 1 };
   bootUp(layers, NumberOf(layers), Actv_Functions, 0, 0);
   printInstructions();
+
+  #ifdef PARALLEL
+  xTaskCreatePinnedToCore(
+    processIncomingMessages, /* Function to implement the task */
+    "Background Message Processing Task", /* Name of the task */
+    40000 , /* Stack size in bytes */
+    NULL, /* Task input parameter */
+    1, /* Priority of the task */
+    NULL, /* Task handle. */
+    0); /* Core where the task should run */
+  // xTaskCreate(processIncomingMessages, "Background Message Processing Task", 2000, NULL, 1, NULL);
+  // xSemaphoreCurrentModel = xSemaphoreCreateMutex();
+  #endif
 }
 
 void loop()
 {
+  #ifndef PARALLEL
+  processMessages();
+  #else
+  if (newModelState == DONE_TRAINING) {
+    // ! TODO needs to check if new metrics are actually better than the current model ones
+    if (true) {
+      delete currentModel;
+      currentModel = newModel;
+      newModel = NULL;
+      newModelState = IDLE;
+      if (currentModelMetrics != NULL) {
+        delete currentModelMetrics;
+      }
+      currentModelMetrics = newModelMetrics;
+      newModelMetrics = NULL;
+    }
+  }
+  if (newModelState == READY_TO_TRAIN) {
+    if (newModelMetrics != NULL) {
+      delete newModelMetrics;
+    }
+    newModelState = MODEL_BUSY;
+    newModelMetrics = trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+    newModelState = DONE_TRAINING;
+  }
+  #endif
 
   if (Serial.available() != 0)
   {
@@ -132,7 +179,4 @@ void loop()
       break;
     }
   }
-
-
-  processMessages();
 }

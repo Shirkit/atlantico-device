@@ -67,7 +67,6 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
     _numberOfLayers = numberOfLayers;
     _learningRateOfWeights = learningRateOfWeights;
     _learningRateOfBiases = learningRateOfBiases;
-    // _clientName = clientName;
 
     D_println("Booting up...");
 
@@ -319,6 +318,7 @@ multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, co
             metrics->meanSqrdError = NN.getMeanSqrdError(1);
 
             // Calculate metrics
+            // ! for non binary classification, the metrics are not calculated correctly
             for (int i = 0; i < metrics->numberOfClasses; i++) {
                 if (y[i] == 1) {
                     if (predictions[i] >= 0.5) {
@@ -353,7 +353,6 @@ multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, co
 }
 
 void processMessages() {
-    //_client.loop();
     mqtt.loop();
 }
 
@@ -368,7 +367,12 @@ void setupMQTT() {
     mqtt.port = 1883;
     connectToServerMQTT();
 
-    mqtt.subscribe(MQTT_TOPIC, [](const char * topic, Stream & stream) {
+    mqtt.subscribe(MQTT_RECEIVE_TOPIC, [](const char * topic, Stream & stream) {
+        if (newModelState != IDLE) {
+            D_println("Already processing a model");
+            return;
+        }
+        newModelState = MODEL_BUSY;
         model* mm = transformDataToModel(stream);
         if (mm != NULL && mm->biases != NULL && mm->weights != NULL) {
             if (tempModel != NULL) {
@@ -382,7 +386,7 @@ void setupMQTT() {
             newModel = new NeuralNetwork(_layers, tempModel->weights, tempModel->biases, _numberOfLayers, _actvFunctions);
             newModel->LearningRateOfBiases = _learningRateOfBiases;
             newModel->LearningRateOfWeights = _learningRateOfWeights;
-            trainNewModel = true;
+            newModelState = READY_TO_TRAIN;
         } 
         else {
             D_println("Error parsing model");
@@ -455,7 +459,7 @@ void sendModelToNetwork(NeuralNetwork& NN) {
         }
     }
 
-    auto publish = mqtt.begin_publish(MQTT_TOPIC, measureJson(doc));
+    auto publish = mqtt.begin_publish(MQTT_PUBLISH_TOPIC, measureJson(doc));
     serializeJson(doc, publish);
     publish.send();
 
