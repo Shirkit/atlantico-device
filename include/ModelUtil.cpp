@@ -1,6 +1,7 @@
 #include "ModelUtil.h"
 
-#include <SPIFFS.h>
+// #include <SPIFFS.h>
+#include "LittleFS.h"
 #include <ArduinoJson.h>
 #include <PicoMQTT.h>
 #include <WiFi.h>
@@ -13,8 +14,8 @@ PicoMQTT::Client mqtt(MQTT_BROKER, 1883);
 unsigned int* _layers;
 int _numberOfLayers;
 byte* _actvFunctions;
-DFLOAT _learningRateOfWeights;
-DFLOAT _learningRateOfBiases;
+float _learningRateOfWeights;
+float _learningRateOfBiases;
 model* tempModel;
 
 File xTest, yTest;
@@ -22,9 +23,10 @@ File xTest, yTest;
 
 // -------------- Interface functions
 
-// #if DEBUG
+#if DEBUG
 
 unsigned long previousMillis = 0;
+multi_heap_info_t info;
 
 void printTiming(bool doReset = false) {
     if (doReset || previousMillis == 0) {
@@ -39,7 +41,14 @@ void printTiming(bool doReset = false) {
     }
 }
 
-// #endif
+void printMemory() {
+    heap_caps_get_info(&info, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); // internal RAM, memory capable to store data or to create new task
+    D_printf("Heap info: %d bytes free\n", info.total_free_bytes);
+    D_printf("Heap info: %d bytes largest free block\n", info.largest_free_block);
+    D_printf("Heap info: %d bytes minimum free ever\n", info.minimum_free_bytes);  
+}
+
+#endif
 
 bool ensureConnected() {
     if (!WiFi.isConnected()) {
@@ -70,13 +79,15 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
 
     D_println("Booting up...");
 
-    if (!SPIFFS.begin(false)) {
-        D_println("Error mounting SPIFFS");
-        // SPIFFS not able to intialize the partition, cannot load from flash and naither save to it later
+    if (!LittleFS.begin(false)) {
+        D_println("Error mounting LittleFS");
+        // LittleFS not able to intialize the partition, cannot load from flash and naither save to it later
         return;
     }
 
-    if (SPIFFS.exists(MODEL_PATH)) {
+    // metricsCollection = new MetricsCollection();
+
+    if (LittleFS.exists(MODEL_PATH)) {
         if (currentModel != NULL) {
             delete currentModel;
         }
@@ -119,19 +130,22 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
             delete currentModelMetrics;
         }
         currentModelMetrics = trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+        // metricsCollection->add(currentModelMetrics);
     }
 
-    xTest = SPIFFS.open(X_TEST_PATH, "r");
-    yTest = SPIFFS.open(Y_TEST_PATH, "r");
+    xTest = LittleFS.open(X_TEST_PATH, "r");
+    yTest = LittleFS.open(Y_TEST_PATH, "r");
 
     setupMQTT();
+
+    ensureConnected();
 
     D_println("Done booting.");
 }
 
 bool saveModelToFlash(NeuralNetwork& NN, const String file) {
     D_println("Saving model to flash...");
-    File modelFile = SPIFFS.open(file, "w");
+    File modelFile = LittleFS.open(file, "w");
     bool result;
     if (!modelFile) {
         // Error opening file
@@ -147,7 +161,7 @@ bool saveModelToFlash(NeuralNetwork& NN, const String file) {
 
 NeuralNetwork* loadModelFromFlash(const String& file) {
     D_println("Loading model from flash...");
-    File modelFile = SPIFFS.open(file, "r");
+    File modelFile = LittleFS.open(file, "r");
     if (!modelFile) {
         // Error opening file
         D_println("Error opening file");
@@ -164,13 +178,14 @@ NeuralNetwork* loadModelFromFlash(const String& file) {
 model* transformDataToModel(Stream& stream) {
     D_println("Transforming data to model...");
     printTiming(true);
+    printMemory();
     // TODO o tamanho padrão pode ser pequeno demais para caber todos os pesos e biases
     JsonDocument doc;
 
-    D_println(stream.available());
-
     // ReadLoggingStream loggingStream(stream, Serial);
+    // ! This is triggering the Watchdog from ESP32 since it takes a long time to deserialize.
     DeserializationError result = deserializeJson(doc, stream);
+    doc.shrinkToFit();
 
     // DeserializationError result = deserializeJson(doc, stream);
     if (result != DeserializationError::Ok) {
@@ -234,8 +249,8 @@ model* transformDataToModel(Stream& stream) {
 multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
     D_println("Training model from original dataset...");
     printTiming(true);
-    File xFile = SPIFFS.open(x_file, "r");
-    File yFile = SPIFFS.open(y_file, "r");
+    File xFile = LittleFS.open(x_file, "r");
+    File yFile = LittleFS.open(y_file, "r");
 
     if (!xFile || !yFile) {
         D_println("Error opening file");
@@ -367,12 +382,62 @@ void setupMQTT() {
     mqtt.port = 1883;
     connectToServerMQTT();
 
+    // TODO Need to handle disconnections properly, when the FL server drops/leaves, when mosquitto dies, when wifi dies
+
+    mqtt.subscribe(MQTT_RECEIVE_COMMANDS_TOPIC, [](const char * topic, Stream & stream) {
+
+        JsonDocument doc;
+
+        // ReadLoggingStream loggingStream(stream, Serial);
+        DeserializationError result = deserializeJson(doc, stream);
+    
+        // DeserializationError result = deserializeJson(doc, stream);
+        if (result != DeserializationError::Ok) {
+            D_println(result.code());
+            D_println("JSON failed to deserialize");
+        } else {
+            D_println("Command: " + String(doc["command"].as<const char*>()));
+            const char* command = doc["command"];
+    
+            if (strcmp(command, "request_model") == 0) {
+                sendModelToNetwork(*currentModel, *currentModelMetrics);
+                if (fedareState == FederateState_TRAINING) {
+                    if (newModel != NULL)
+                        delete newModel;
+                    if (newModelMetrics != NULL)
+                        delete newModelMetrics;
+                    newModelState = ModelState_IDLE;
+                }
+            } else if (strcmp(command, "federate_join") == 0) {
+                if (fedareState == FederateState_NONE) {
+                    fedareState = FederateState_SUBSCRIBED;
+                    sendMessageToNetwork(FederateCommand_JOIN);
+                }
+            } else if (strcmp(command, "federate_unsubscribe") == 0) {
+                if (fedareState != FederateState_NONE) {
+                    fedareState = FederateState_NONE;
+                    sendMessageToNetwork(FederateCommand_LEAVE);
+                }
+            } else if (strcmp(command, "federate_start") == 0) {
+                if (fedareState == FederateState_SUBSCRIBED) {
+                    fedareState = FederateState_TRAINING;
+                    sendModelToNetwork(*currentModel, *currentModelMetrics);
+                }
+            } else if (strcmp(command, "federate_end") == 0) {
+                if (fedareState != FederateState_NONE) {
+                    fedareState = FederateState_DONE;
+                }
+            }
+        }
+    });
+
     mqtt.subscribe(MQTT_RECEIVE_TOPIC, [](const char * topic, Stream & stream) {
-        if (newModelState != IDLE) {
+        printMemory();
+        if (newModelState != ModelState_IDLE) {
             D_println("Already processing a model");
             return;
         }
-        newModelState = MODEL_BUSY;
+        newModelState = ModelState_MODEL_BUSY;
         model* mm = transformDataToModel(stream);
         if (mm != NULL && mm->biases != NULL && mm->weights != NULL) {
             if (tempModel != NULL) {
@@ -386,9 +451,22 @@ void setupMQTT() {
             newModel = new NeuralNetwork(_layers, tempModel->weights, tempModel->biases, _numberOfLayers, _actvFunctions);
             newModel->LearningRateOfBiases = _learningRateOfBiases;
             newModel->LearningRateOfWeights = _learningRateOfWeights;
-            newModelState = READY_TO_TRAIN;
+            newModelState = ModelState_READY_TO_TRAIN;
         } 
         else {
+            if (mm != NULL) {
+                delete mm;
+            }
+            if (tempModel != NULL) {
+                delete tempModel;
+            }
+            if (newModel != NULL) {
+                delete newModel;
+            }
+            mm = NULL;
+            tempModel = NULL;
+            newModel = NULL;
+            newModelState = ModelState_IDLE;
             D_println("Error parsing model");
         }
     });
@@ -421,9 +499,47 @@ bool connectToServerMQTT() {
     return mqtt.connect(MQTT_BROKER, 1883, CLIENT_NAME);
 }
 
-void sendModelToNetwork(NeuralNetwork& NN) {
+void sendMessageToNetwork(FederateCommand command) {
+    if (!ensureConnected()) {
+        D_println("Not connected to the network");
+        return;
+    }
+
+    JsonDocument doc;
+
+    switch (command)
+    {
+    case FederateCommand_JOIN:
+        doc["command"] = "join";
+        doc["client"] = CLIENT_NAME;
+        doc["metrics"] = JsonObject();
+        doc["metrics"]["accuracy"] = currentModelMetrics->accuracy();
+        doc["metrics"]["precision"] = currentModelMetrics->precision();
+        doc["metrics"]["recall"] = currentModelMetrics->recall();
+        doc["metrics"]["f1Score"] = currentModelMetrics->f1Score();
+        doc["metrics"]["meanSqrdError"] = currentModelMetrics->meanSqrdError;
+        doc["metrics"]["numberOfClasses"] = currentModelMetrics->numberOfClasses;
+        doc["metrics"]["truePositives"] = JsonArray();
+        doc["metrics"]["falsePositives"] = JsonArray();
+        doc["metrics"]["trueNegatives"] = JsonArray();
+        doc["metrics"]["falseNegatives"] = JsonArray();
+        for (int i = 0; i < currentModelMetrics->numberOfClasses; i++) {
+            doc["metrics"]["truePositives"].add(currentModelMetrics->metrics[i].truePositives);
+            doc["metrics"]["falsePositives"].add(currentModelMetrics->metrics[i].falsePositives);
+            doc["metrics"]["trueNegatives"].add(currentModelMetrics->metrics[i].trueNegatives);
+            doc["metrics"]["falseNegatives"].add(currentModelMetrics->metrics[i].falseNegatives);
+        }
+        auto publish = mqtt.begin_publish(MQTT_SEND_COMMANDS_TOPIC, measureJson(doc));
+        serializeJson(doc, publish);
+        publish.send();
+        break;    
+    }
+}
+
+void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics) {
 
     if (!ensureConnected()) {
+        D_println("Not connected to the network");
         return;
     }
 
@@ -441,6 +557,24 @@ void sendModelToNetwork(NeuralNetwork& NN) {
 
     doc["biases"] = JsonArray();
     doc["weights"] = JsonArray();
+    doc["client"] = CLIENT_NAME;
+    doc["metrics"] = JsonObject();
+    doc["metrics"]["accuracy"] = metrics.accuracy();
+    doc["metrics"]["precision"] = metrics.precision();
+    doc["metrics"]["recall"] = metrics.recall();
+    doc["metrics"]["f1Score"] = metrics.f1Score();
+    doc["metrics"]["meanSqrdError"] = metrics.meanSqrdError;
+    doc["metrics"]["numberOfClasses"] = metrics.numberOfClasses;
+    doc["metrics"]["truePositives"] = JsonArray();
+    doc["metrics"]["falsePositives"] = JsonArray();
+    doc["metrics"]["trueNegatives"] = JsonArray();
+    doc["metrics"]["falseNegatives"] = JsonArray();
+    for (int i = 0; i < metrics.numberOfClasses; i++) {
+        doc["metrics"]["truePositives"].add(metrics.metrics[i].truePositives);
+        doc["metrics"]["falsePositives"].add(metrics.metrics[i].falsePositives);
+        doc["metrics"]["trueNegatives"].add(metrics.metrics[i].trueNegatives);
+        doc["metrics"]["falseNegatives"].add(metrics.metrics[i].falseNegatives);
+    }
 
     for (unsigned int n = 0; n < NN.numberOflayers; n++) {
         for (unsigned int i = 0; i < NN.layers[n]._numberOfOutputs; i++) {
@@ -464,6 +598,7 @@ void sendModelToNetwork(NeuralNetwork& NN) {
     publish.send();
 
     printTiming();
+    D_println(CLIENT_NAME);
     D_println("Model sent to the network...");
 }
 
@@ -563,7 +698,7 @@ testData* readTestData() {
 // -------------- Unimplemeneted
 /*
 void receiveModelFromNetwork() {
-    File modelFile = SPIFFS.open(NEW_MODEL_PATH, "w");
+    File modelFile = LittleFS.open(NEW_MODEL_PATH, "w");
     transformDataToModel(modelFile);
     modelFile.close();
 }

@@ -19,6 +19,7 @@
 #define D_println(...)  Serial.println(__VA_ARGS__)
 #define D_printf(...)   Serial.printf(__VA_ARGS__)
 #define printTiming(...)   printTiming(__VA_ARGS__)
+#define printMemory(...)   printMemory(__VA_ARGS__)
 #else
 #define D_SerialBegin(...)
 #define D_print(...)
@@ -33,19 +34,21 @@
 #define MODEL_PATH "/model.nn"
 #define NEW_MODEL_PATH "/new_model.nn"
 #define TEMPORARY_NEW_MODEL_PATH "/new_model_temp.nn"
-#define X_TRAIN_PATH "/x_train_esp32.csv"
-#define Y_TRAIN_PATH "/y_train_esp32.csv"
-#define X_TEST_PATH "/x_test_esp32.csv"
-#define Y_TEST_PATH "/y_test_esp32.csv"
+#define X_TRAIN_PATH "/x_train_4.csv"
+#define Y_TRAIN_PATH "/y_train_4.csv"
+#define X_TEST_PATH "/x_test_4.csv"
+#define Y_TEST_PATH "/y_test_4.csv"
 #define GATHERED_DATA_PATH "/data.db"
-#define CLIENT_NAME "esp01"
-#define MQTT_PUBLISH_TOPIC "esp32/fl/push/esp01"
-#define MQTT_RECEIVE_TOPIC "esp32/fl/pull/esp01"
+#define CLIENT_NAME "esp04"
+#define MQTT_PUBLISH_TOPIC "esp32/fl/model/push"
+#define MQTT_RECEIVE_TOPIC "esp32/fl/model/pull"
+#define MQTT_RECEIVE_COMMANDS_TOPIC "esp32/fl/commands/pull"
+#define MQTT_SEND_COMMANDS_TOPIC "esp32/fl/commands/push"
 // #define BATCH_SIZE 8
-#define EPOCHS 2
-#define WIFI_SSID "PedroRapha"
+#define EPOCHS 1
+#define WIFI_SSID "Redmi Note 8"
 #define WIFI_PASSWORD "456123789a"
-#define MQTT_BROKER "192.168.15.13"
+#define MQTT_BROKER "192.168.43.235"
 // #define MQTT_MESSAGE_SIZE 500
 #define CONNECTION_TIMEOUT 30000 // in miliseconds
 
@@ -53,6 +56,7 @@
  * Defining the JSON structure for networking messaging
  * {
  *   "precision"    :   "float" | "double",
+ *   "client"       :   string,
  *   "biases"       :   float[] | double[],
  *   "weights"      :   float[] | double[],
  *   }
@@ -75,27 +79,32 @@ struct classClassifierMetricts {
     unsigned int falseNegatives = 0;
 
     DFLOAT totalPredictions() {
-        return (DFLOAT) truePositives + trueNegatives + falsePositives + falseNegatives;
-    }
-
-    DFLOAT correctPredictions() {
-        return (DFLOAT) truePositives + trueNegatives;
+        return truePositives + falseNegatives;
     }
 
     DFLOAT accuracy() {
-        return (DFLOAT) correctPredictions() / totalPredictions();
+        return ((DFLOAT) truePositives + trueNegatives) / ((DFLOAT) (truePositives + trueNegatives + falsePositives + falseNegatives));
     }
 
     DFLOAT precision() {
-        return (DFLOAT) truePositives / (truePositives + falsePositives);
+        DFLOAT precision = (DFLOAT) truePositives / (truePositives + falsePositives);
+        if (precision != precision)
+            return 0;
+        return precision;
     }
 
     DFLOAT recall() {
-        return (DFLOAT) truePositives / (truePositives + falseNegatives);
+        DFLOAT recall = (DFLOAT) truePositives / (truePositives + falseNegatives);
+        if (recall != recall)
+            return 0;
+        return recall;
     }
 
     DFLOAT f1Score() {
-        return (DFLOAT) 2 * (precision() * recall()) / (precision() + recall());
+        DFLOAT f1Score = (DFLOAT) 2 * (precision() * recall()) / (precision() + recall());
+        if (f1Score != f1Score)
+            return 0;
+        return f1Score;
     }
 };
 
@@ -103,6 +112,14 @@ struct multiClassClassifierMetrics {
     classClassifierMetricts* metrics;
     unsigned int numberOfClasses;
     DFLOAT meanSqrdError;
+
+    DFLOAT totalPredictions() {
+        DFLOAT sum = 0;
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            sum += metrics[i].truePositives + metrics[i].falseNegatives;
+        }
+        return sum;
+    }
 
     DFLOAT accuracy() {
         DFLOAT sum = 0;
@@ -135,6 +152,39 @@ struct multiClassClassifierMetrics {
         }
         return sum / numberOfClasses;
     }
+
+    DFLOAT balancedAccuracy() {
+        DFLOAT sum = 0;
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            sum += metrics[i].accuracy() * (metrics[i].totalPredictions() / totalPredictions());
+        }
+        return sum;
+    }
+
+    DFLOAT balancedPrecision() {
+        DFLOAT sum = 0;
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            sum += metrics[i].precision() * (metrics[i].totalPredictions() / totalPredictions());
+        }
+        return sum;
+    }
+
+    DFLOAT balancedRecall() {
+        DFLOAT sum = 0;
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            sum += metrics[i].recall() * (metrics[i].totalPredictions() / totalPredictions());
+        }
+        return sum;
+    }
+
+    DFLOAT balancedF1Score() {
+        DFLOAT sum = 0;
+        for (unsigned int i = 0; i < numberOfClasses; i++) {
+            sum += metrics[i].f1Score() * (metrics[i].totalPredictions() / (float) totalPredictions());
+        }
+        return sum;
+    }
+
 
     void print() {
         Serial.println("Metrics:");
@@ -188,13 +238,67 @@ struct testData {
 };
 
 enum ModelState {
-    IDLE,
-    READY_TO_TRAIN,
-    DONE_TRAINING,
-    MODEL_BUSY,
+    ModelState_IDLE,
+    ModelState_READY_TO_TRAIN,
+    ModelState_DONE_TRAINING,
+    ModelState_MODEL_BUSY,
 };
 
-ModelState newModelState = IDLE;
+enum FederateState {
+    FederateState_NONE,
+    FederateState_SUBSCRIBED,
+    FederateState_TRAINING,
+    FederateState_DONE
+};
+
+enum FederateCommand {
+    FederateCommand_JOIN,
+    FederateCommand_READY,
+    FederateCommand_LEAVE,
+};
+/*
+class MetricsCollection {
+    private:
+        std::vector<multiClassClassifierMetrics*> metrics;
+        
+    public:
+        ~MetricsCollection() {
+            clear();  // Auto-cleanup
+        }
+        
+        void add(multiClassClassifierMetrics* item) {
+            metrics.push_back(item);
+        }
+        
+        multiClassClassifierMetrics* get(size_t index) {
+            return (index < metrics.size()) ? metrics[index] : nullptr;
+        }
+        
+        bool remove(size_t index) {
+            if (index >= metrics.size()) return false;
+            delete metrics[index];
+            metrics.erase(metrics.begin() + index);
+            return true;
+        }
+        
+        size_t size() const {
+            return metrics.size();
+        }
+        
+        bool isEmpty() const {
+            return metrics.empty();
+        }
+        
+        void clear() {
+            for (auto m : metrics) {
+                delete m;
+            }
+            metrics.clear();
+        }
+};
+*/
+ModelState newModelState = ModelState_IDLE;
+FederateState fedareState = FederateState_NONE;
 NeuralNetwork* newModel = NULL;
 NeuralNetwork* currentModel = NULL;
 multiClassClassifierMetrics* currentModelMetrics = NULL;
@@ -215,6 +319,10 @@ NeuralNetwork* loadModelFromFlash(const String& file);
 model* transformDataToModel(Stream& stream);
 
 multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file);
+
+void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics);
+
+void sendMessageToNetwork(FederateCommand command);
 
 void processMessages();
 
