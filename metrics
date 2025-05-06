@@ -1,0 +1,89 @@
+Usando Doubles
+
+20 colunas
+- 2 épocas
+- 1000 linhas
+- 20-16-8-6
+    - 12218
+    - 6.109 ms por linha
+    - 496 neurônios
+    - 0.012316532 ms por linha por neurônio
+
+
+40 colunas
+- 2 épocas
+- 1000 linhas
+- 40-20-10-6
+    - 22935 ms
+    - 11.4675 ms por linha
+    - 1060 neurônios
+    - 0.010818396 ms por linha por neurônio
+
+
+80 colunas
+- 2 épocas
+- 1000 linhas
+- 80-40-20-6
+    - 56078 ms
+    - 28.039 ms por linha
+    - 4120 neurônios
+    - 0.006805583 ms por linha por neurônio
+
+
+160 colunas
+- 2 épocas
+- 900 linhas
+- 160-80-40-6
+    - 140027 ms
+    - 77.7928 ms por linha
+    - 16240 neurônios
+    - 0.004790196 ms por linha por neurônio
+
+
+320 colunas
+- 2 épocas
+- 400 linhas
+- 320-160-80-40-20-6
+    - sem memória
+    - 68120 neurônios
+- 320-128-60-30-15-6
+    - sem memória
+    - 50980 neurônios
+- 320-107-36-12-6
+    - sem memória
+    - 38596 neurônios
+- 320-80-20-6
+    - faltou memória em outras áreas
+    - 105188 ms
+    - 131.485 ms por linha
+    - 27320 neurônios
+    - 0.004812775 ms por linha por neurônio
+
+========================
+
+Usando Floats
+
+160 colunas
+- 160-80-40-20-6
+    - não consigo enviar o modelo
+- 160-64-24-6
+    - não consigo enviar o modelo
+- 160-40-6
+    - 612 ms pra enviar o modelo de 150kb
+
+320 colunas
+- 2 épocas
+- 400 linhas
+    - 53543 ms
+    - 66.92875 ms por linha
+    - 27320 neurônios
+    - 0.002449808 ms por linha por neurônio
+
+X colunas
+- 2 épocas
+- Y linhas
+- X-Y-Z-6
+    - X ms
+    - Y ms por linha
+    - Z neurônios
+    - W ms por linha por neurônio

@@ -1,54 +1,39 @@
-fazer de forma mais genérica
+Rodar ao mesmo tempo com mais devices
+- tem que automatizar o servidor para ficar funcionando
+- automatizar os devices para envio e recebimento do modelo
 
-consertar a database
+Para cada device, tem que guardar as métricas
 
-realizar o treinamento
-enviar para o agregrador
-receber de volta do servidor
-treinar novamente depois de recebido
+Precisa lidar melhor com explosão de gradiente
 
-métricas
-- acurácia
-- precisão
-- recall
-- f1 score
-- erro quadrático
+----------------
 
-novos dados dos sensores implicam em dados não normalizados sendo escritos no dataset
-- teria que normalizar os dados
-- ou então pega o próprio dataset para simular as entradas
-    - tipo, pega aleatoriamente uma linha para simular o input
+Colocar os 5 no processo federado
 
-Cálculo de tempos:
-- para transmissão do modelo no device (tempo mínimo, e com um delay artificial)
-- quanto tempo leva o servidor para transmitir para o device
-- quanto tempo leva para treinar
-    - tempo de treinamento por registro
+Dar split nos datasets logo para cada device
 
+Mandam os modelos pro servidor
 
-==========
+O servidor faz a agregação
 
-definir qual vai ser o padrão que vai receber do dataset
+Manda de volta o modelo agregado
 
-definir a arquitetura do arquivo de pesos e biases
+Colocar por exemplo, 2-3-4-5-6 (ir aumentando) rodadas de comunicação
 
-a estrutura que vai tratar o dataset tem que ser a mesma
-- se trocar o dataset fazer os mesmos passos
+----------------
 
+Cada vez que receber no servidor, enviar as métricas junto com o modelo
 
+Manter os dados históricos (manter por rodada)
+- tempo de treinamento (sem separar o tempo de IO)
+- ver se consigo medir o tempo de IO sem perder muito tempo
 
-Pedro
+--------------------
 
-Receber o modelo no device
-Transformar o modelo
-- ajustar à biblioteca
-Treinar o novo modelo com o dataset do device
-- manter o modelo vingente para realizar inferência
-- enquanto está treinando com o novo modelo, sem interferir um ao outro
-Depois que terminar o treinamento, substituir o modelo antigo pelo novo 
-Enviar o modelo de volta
+Confeccionar os gráficos dos resultados
 
-Futuro
+Métricas para datasets desbalanceados
 
-Cálculo de outras métricas no próprio device
-- Recall, Acurácia, Precisão
+---------------------------
+
+Pro futuro, gerar e guardar as métricas de um dataset de testes (validação)

@@ -1,0 +1,3 @@
+Para modelos grandes demais (acima de 6600 neurônios) é necessário reformular a maneira de enviar o modelo por MQTT para caber no buffer
+- na verdade, o problema é que não cabe na memória do ESP
+- então tem que quebrar a mensagem (ou json) em vários pedaços antes de ser enviado
