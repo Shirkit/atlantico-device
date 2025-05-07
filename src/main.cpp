@@ -103,8 +103,9 @@ void loop()
       delete newModelMetrics;
     }
     newModelState = ModelState_MODEL_BUSY;
-    // ! }It was throwing kernel panic due to high cpu usage without releasing the core before increasing the WatchDog timer
+    // ! It was throwing kernel panic due to high cpu usage without releasing the core before increasing the WatchDog timer
     newModelMetrics = trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+    newModelMetrics->parsingTime = tempModel->parsingTime;
     newModelState = ModelState_DONE_TRAINING;
     if (fedareState == FederateState_TRAINING) {
       sendModelToNetwork(*newModel, *newModelMetrics);
@@ -144,6 +145,7 @@ void loop()
       newModelMetrics = NULL;
     }
     if (fedareState == FederateState_DONE) {
+      sendModelToNetwork(*currentModel, *currentModelMetrics);
       fedareState = FederateState_SUBSCRIBED;
     }
   }

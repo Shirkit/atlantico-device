@@ -66,6 +66,7 @@
 struct model {
     DFLOAT *biases;
     DFLOAT *weights;
+    unsigned long parsingTime = 0;
     ~model() {
         delete[] biases;
         delete[] weights;
@@ -112,6 +113,9 @@ struct multiClassClassifierMetrics {
     classClassifierMetricts* metrics;
     unsigned int numberOfClasses;
     DFLOAT meanSqrdError;
+    unsigned long parsingTime = 0;
+    unsigned long trainingTime = 0;
+    unsigned long epochs = 0;
 
     DFLOAT totalPredictions() {
         DFLOAT sum = 0;

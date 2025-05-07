@@ -17,6 +17,8 @@ byte* _actvFunctions;
 float _learningRateOfWeights;
 float _learningRateOfBiases;
 model* tempModel;
+unsigned long datasetSize = 0;
+unsigned long previousTransmit = 0, previousConstruct = 0;
 
 File xTest, yTest;
 // TODO Write into file while receiving the payload to avoid using too much memory.
@@ -180,6 +182,7 @@ model* transformDataToModel(Stream& stream) {
     printTiming(true);
     printMemory();
     // TODO o tamanho padrão pode ser pequeno demais para caber todos os pesos e biases
+    unsigned long startTime = millis();
     JsonDocument doc;
 
     // ReadLoggingStream loggingStream(stream, Serial);
@@ -241,6 +244,7 @@ model* transformDataToModel(Stream& stream) {
     model* m = new model;
     m->biases = bias;
     m->weights = weight;
+    m->parsingTime = millis() - startTime;
     printTiming();
     D_println("Transformation complete.");
     return m;
@@ -249,6 +253,11 @@ model* transformDataToModel(Stream& stream) {
 multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file) {
     D_println("Training model from original dataset...");
     printTiming(true);
+
+    unsigned long initTime = millis();
+
+    datasetSize = 0;
+
     File xFile = LittleFS.open(x_file, "r");
     File yFile = LittleFS.open(y_file, "r");
 
@@ -274,6 +283,7 @@ multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, co
             // Read full lines using String which handles dynamic memory
             xLine = xFile.readStringUntil('\n');
             yLine = yFile.readStringUntil('\n');
+            datasetSize++;
 
             if (xLine.length() == 0 || yLine.length() == 0) {
                 break;
@@ -359,6 +369,9 @@ multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, co
         yFile.seek(0);
         xFile.seek(0);
     }
+
+    metrics->trainingTime = millis() - initTime;
+    metrics->epochs = EPOCHS;
 
     xFile.close();
     yFile.close();
@@ -545,8 +558,9 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
 
     D_println("Sending model to the network...");
     printTiming(true);
+    unsigned long startTime = millis();
 
-    // TODO o tamanho padrão pode ser pequeno demais para caber todos os pesos e biases
+    // TODO the standard size may be too small to fit all weights and biases
     JsonDocument doc;
 
 #if defined(USE_64_BIT_DOUBLE)
@@ -555,6 +569,7 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
     doc["precision"] = "float";
 #endif
 
+    // TODO Migrate this code into a function that persists after the function exits
     doc["biases"] = JsonArray();
     doc["weights"] = JsonArray();
     doc["client"] = CLIENT_NAME;
@@ -576,6 +591,19 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
         doc["metrics"]["falseNegatives"].add(metrics.metrics[i].falseNegatives);
     }
 
+    doc["model"] = JsonArray();
+    for (unsigned int n = 0; n < NN.numberOflayers; n++) {
+        doc["model"].add(NN.layers[n]._numberOfInputs);
+    }
+    doc["model"].add(NN.layers[NN.numberOflayers - 1]._numberOfOutputs);
+    doc["epochs"] = metrics.epochs;
+    doc["datasetSize"] = datasetSize;
+    doc["timings"] = JsonObject();
+    doc["timings"]["previousTransmit"] = previousTransmit;
+    doc["timings"]["previousConstruct"] = previousConstruct;
+    doc["timings"]["training"] = metrics.trainingTime;
+    doc["timings"]["parsing"] = metrics.parsingTime;
+
     for (unsigned int n = 0; n < NN.numberOflayers; n++) {
         for (unsigned int i = 0; i < NN.layers[n]._numberOfOutputs; i++) {
 #if defined(USE_64_BIT_DOUBLE)
@@ -593,9 +621,15 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
         }
     }
 
+    
     auto publish = mqtt.begin_publish(MQTT_PUBLISH_TOPIC, measureJson(doc));
     serializeJson(doc, publish);
+    unsigned long midpoint = millis();
     publish.send();
+
+    unsigned long endTime = millis();
+    previousConstruct = midpoint - startTime;
+    previousTransmit = endTime - midpoint;
 
     printTiming();
     D_println(CLIENT_NAME);
