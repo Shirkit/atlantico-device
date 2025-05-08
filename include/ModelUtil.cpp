@@ -19,6 +19,7 @@ float _learningRateOfBiases;
 model* tempModel;
 unsigned long datasetSize = 0;
 unsigned long previousTransmit = 0, previousConstruct = 0;
+int currentRound = -1;
 
 File xTest, yTest;
 // TODO Write into file while receiving the payload to avoid using too much memory.
@@ -245,6 +246,10 @@ model* transformDataToModel(Stream& stream) {
     m->biases = bias;
     m->weights = weight;
     m->parsingTime = millis() - startTime;
+    m->round = -1;
+    if (doc.containsKey("round")) {
+        m->round = doc["round"].as<int>();
+    }
     printTiming();
     D_println("Transformation complete.");
     return m;
@@ -429,16 +434,19 @@ void setupMQTT() {
             } else if (strcmp(command, "federate_unsubscribe") == 0) {
                 if (fedareState != FederateState_NONE) {
                     fedareState = FederateState_NONE;
+                    currentRound = -1;
                     sendMessageToNetwork(FederateCommand_LEAVE);
                 }
             } else if (strcmp(command, "federate_start") == 0) {
                 if (fedareState == FederateState_SUBSCRIBED) {
                     fedareState = FederateState_TRAINING;
+                    currentRound = 0;
                     sendModelToNetwork(*currentModel, *currentModelMetrics);
                 }
             } else if (strcmp(command, "federate_end") == 0) {
                 if (fedareState != FederateState_NONE) {
                     fedareState = FederateState_DONE;
+                    currentRound = -1;
                 }
             }
         }
@@ -458,6 +466,9 @@ void setupMQTT() {
             }
             if (newModel != NULL) {
                 delete newModel;
+            }
+            if (mm->round >= 0) {
+                currentRound = mm->round;
             }
             tempModel = mm;
             D_println("Model parsed successfully...");

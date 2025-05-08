@@ -34,12 +34,12 @@
 #define MODEL_PATH "/model.nn"
 #define NEW_MODEL_PATH "/new_model.nn"
 #define TEMPORARY_NEW_MODEL_PATH "/new_model_temp.nn"
-#define X_TRAIN_PATH "/x_train_4.csv"
-#define Y_TRAIN_PATH "/y_train_4.csv"
-#define X_TEST_PATH "/x_test_4.csv"
-#define Y_TEST_PATH "/y_test_4.csv"
+#define X_TRAIN_PATH "/x_train_1.csv"
+#define Y_TRAIN_PATH "/y_train_1.csv"
+#define X_TEST_PATH "/x_test_1.csv"
+#define Y_TEST_PATH "/y_test_1.csv"
 #define GATHERED_DATA_PATH "/data.db"
-#define CLIENT_NAME "esp04"
+#define CLIENT_NAME "esp01"
 #define MQTT_PUBLISH_TOPIC "esp32/fl/model/push"
 #define MQTT_RECEIVE_TOPIC "esp32/fl/model/pull"
 #define MQTT_RECEIVE_COMMANDS_TOPIC "esp32/fl/commands/pull"
@@ -67,6 +67,7 @@ struct model {
     DFLOAT *biases;
     DFLOAT *weights;
     unsigned long parsingTime = 0;
+    int round;
     ~model() {
         delete[] biases;
         delete[] weights;
