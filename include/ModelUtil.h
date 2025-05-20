@@ -261,57 +261,13 @@ enum FederateCommand {
     FederateCommand_READY,
     FederateCommand_LEAVE,
 };
-/*
-class MetricsCollection {
-    private:
-        std::vector<multiClassClassifierMetrics*> metrics;
-        
-    public:
-        ~MetricsCollection() {
-            clear();  // Auto-cleanup
-        }
-        
-        void add(multiClassClassifierMetrics* item) {
-            metrics.push_back(item);
-        }
-        
-        multiClassClassifierMetrics* get(size_t index) {
-            return (index < metrics.size()) ? metrics[index] : nullptr;
-        }
-        
-        bool remove(size_t index) {
-            if (index >= metrics.size()) return false;
-            delete metrics[index];
-            metrics.erase(metrics.begin() + index);
-            return true;
-        }
-        
-        size_t size() const {
-            return metrics.size();
-        }
-        
-        bool isEmpty() const {
-            return metrics.empty();
-        }
-        
-        void clear() {
-            for (auto m : metrics) {
-                delete m;
-            }
-            metrics.clear();
-        }
-};
-*/
+
 ModelState newModelState = ModelState_IDLE;
 FederateState fedareState = FederateState_NONE;
 NeuralNetwork* newModel = NULL;
 NeuralNetwork* currentModel = NULL;
 multiClassClassifierMetrics* currentModelMetrics = NULL;
 multiClassClassifierMetrics* newModelMetrics = NULL;
-
-#ifdef PARALLEL
-// SemaphoreHandle_t xSemaphoreCurrentModel = NULL;
-#endif
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions);
 
@@ -335,12 +291,14 @@ DFLOAT* predictFromCurrentModel(DFLOAT* x);
 
 testData* readTestData();
 
-// --------------
-
-
 void setupMQTT();
+
 bool connectToWifi(bool forever = true);
-// void mqttCallback(char* topic, byte* payload, unsigned int length);
+
 bool connectToServerMQTT();
+
+void processModel();
+
+bool compareMetrics(multiClassClassifierMetrics* oldMetrics, multiClassClassifierMetrics* newMetrics);
 
 #endif /* MODELUTIL_H_ */

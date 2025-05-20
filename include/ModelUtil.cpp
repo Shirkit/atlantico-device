@@ -8,8 +8,7 @@
 
 // -------------- Variables
 
-WiFiClient __espClient;
-PicoMQTT::Client mqtt(MQTT_BROKER, 1883);
+PicoMQTT::Client mqtt(MQTT_BROKER, 1883, CLIENT_NAME, nullptr, nullptr, 5000UL, 30000UL, 10000UL);
 
 unsigned int* _layers;
 int _numberOfLayers;
@@ -48,7 +47,7 @@ void printMemory() {
     heap_caps_get_info(&info, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); // internal RAM, memory capable to store data or to create new task
     D_printf("Heap info: %d bytes free\n", info.total_free_bytes);
     D_printf("Heap info: %d bytes largest free block\n", info.largest_free_block);
-    D_printf("Heap info: %d bytes minimum free ever\n", info.minimum_free_bytes);  
+    D_printf("Heap info: %d bytes minimum free ever\n", info.minimum_free_bytes);
 }
 
 #endif
@@ -87,8 +86,6 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         // LittleFS not able to intialize the partition, cannot load from flash and naither save to it later
         return;
     }
-
-    // metricsCollection = new MetricsCollection();
 
     if (LittleFS.exists(MODEL_PATH)) {
         if (currentModel != NULL) {
@@ -131,13 +128,11 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         currentModel->LearningRateOfWeights = _learningRateOfWeights;
         if (currentModelMetrics != NULL) {
             delete currentModelMetrics;
-        }
-        currentModelMetrics = trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+        }        D_println("Creating new model...");
+        printMemory();ModelMetrics = trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
         // metricsCollection->add(currentModelMetrics);
     }
 
-    xTest = LittleFS.open(X_TEST_PATH, "r");
-    yTest = LittleFS.open(Y_TEST_PATH, "r");
 
     setupMQTT();
 
@@ -389,26 +384,21 @@ void processMessages() {
     mqtt.loop();
 }
 
-
-// -------------- Local functions
-
 void setupMQTT() {
     D_println("Setting up MQTT...");
+    
     connectToWifi(true);
-    mqtt.client_id = CLIENT_NAME;
-    mqtt.host = MQTT_BROKER;
-    mqtt.port = 1883;
     connectToServerMQTT();
 
     // TODO Need to handle disconnections properly, when the FL server drops/leaves, when mosquitto dies, when wifi dies
 
-    mqtt.subscribe(MQTT_RECEIVE_COMMANDS_TOPIC, [](const char * topic, Stream & stream) {
+    mqtt.subscribe(MQTT_RECEIVE_COMMANDS_TOPIC, [](const char* topic, Stream& stream) {
 
         JsonDocument doc;
 
         // ReadLoggingStream loggingStream(stream, Serial);
         DeserializationError result = deserializeJson(doc, stream);
-    
+
         // DeserializationError result = deserializeJson(doc, stream);
         if (result != DeserializationError::Ok) {
             D_println(result.code());
@@ -416,7 +406,7 @@ void setupMQTT() {
         } else {
             D_println("Command: " + String(doc["command"].as<const char*>()));
             const char* command = doc["command"];
-    
+
             if (strcmp(command, "request_model") == 0) {
                 sendModelToNetwork(*currentModel, *currentModelMetrics);
                 if (fedareState == FederateState_TRAINING) {
@@ -450,9 +440,9 @@ void setupMQTT() {
                 }
             }
         }
-    });
+        });
 
-    mqtt.subscribe(MQTT_RECEIVE_TOPIC, [](const char * topic, Stream & stream) {
+    mqtt.subscribe(MQTT_RECEIVE_TOPIC, [](const char* topic, Stream& stream) {
         printMemory();
         if (newModelState != ModelState_IDLE) {
             D_println("Already processing a model");
@@ -476,8 +466,7 @@ void setupMQTT() {
             newModel->LearningRateOfBiases = _learningRateOfBiases;
             newModel->LearningRateOfWeights = _learningRateOfWeights;
             newModelState = ModelState_READY_TO_TRAIN;
-        } 
-        else {
+        } else {
             if (mm != NULL) {
                 delete mm;
             }
@@ -493,7 +482,7 @@ void setupMQTT() {
             newModelState = ModelState_IDLE;
             D_println("Error parsing model");
         }
-    });
+        });
 }
 
 bool connectToWifi(bool forever) {
@@ -556,7 +545,7 @@ void sendMessageToNetwork(FederateCommand command) {
         auto publish = mqtt.begin_publish(MQTT_SEND_COMMANDS_TOPIC, measureJson(doc));
         serializeJson(doc, publish);
         publish.send();
-        break;    
+        break;
     }
 }
 
@@ -632,7 +621,6 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
         }
     }
 
-    
     auto publish = mqtt.begin_publish(MQTT_PUBLISH_TOPIC, measureJson(doc));
     serializeJson(doc, publish);
     unsigned long midpoint = millis();
@@ -652,6 +640,14 @@ DFLOAT* predictFromCurrentModel(DFLOAT* x) {
 }
 
 testData* readTestData() {
+    if (xTest.name() == nullptr) {
+        xTest = LittleFS.open(X_TEST_PATH, "r");
+    }
+
+    if (yTest.name() == nullptr) {
+        yTest = LittleFS.open(Y_TEST_PATH, "r");
+    }
+
     if (!xTest) {
         D_println("Error opening file");
         return NULL;
@@ -738,6 +734,75 @@ testData* readTestData() {
     td->y = y;
     return td;
 
+}
+
+bool compareMetrics(multiClassClassifierMetrics* oldMetrics, multiClassClassifierMetrics* newMetrics) {
+    if (oldMetrics == NULL || newMetrics == NULL) {
+        return false;
+    }
+    if (newMetrics->accuracy() > oldMetrics->accuracy() ||
+        newMetrics->precision() > oldMetrics->precision() ||
+        newMetrics->recall() > oldMetrics->recall() ||
+        newMetrics->f1Score() > oldMetrics->f1Score()) {
+        Serial.println("New model is better than the old one");
+        return true;
+    }
+    return false;
+}
+
+void processModel() {
+    if (newModelState == ModelState_READY_TO_TRAIN) {
+        if (newModelMetrics != NULL) {
+            delete newModelMetrics;
+        }
+        newModelState = ModelState_MODEL_BUSY;
+        // ! It was throwing kernel panic due to high cpu usage without releasing the core before increasing the WatchDog timer
+        newModelMetrics = trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+        newModelMetrics->parsingTime = tempModel->parsingTime;
+        newModelState = ModelState_DONE_TRAINING;
+        if (fedareState == FederateState_TRAINING) {
+            sendModelToNetwork(*newModel, *newModelMetrics);
+            if (newModelMetrics != NULL) {
+                delete newModelMetrics;
+                newModelMetrics = NULL;
+            }
+            if (newModel != NULL) {
+                delete newModel;
+                newModel = NULL;
+            }
+            if (tempModel != NULL) {
+                delete tempModel;
+                tempModel = NULL;
+            }
+            newModelState = ModelState_IDLE;
+        }
+    }
+    if (newModelState == ModelState_DONE_TRAINING) {
+        if (compareMetrics(currentModelMetrics, newModelMetrics)) {
+            delete currentModel;
+            currentModel = newModel;
+            newModel = NULL;
+            newModelState = ModelState_IDLE;
+            if (currentModelMetrics != NULL) {
+                delete currentModelMetrics;
+            }
+            currentModelMetrics = newModelMetrics;
+            newModelMetrics = NULL;
+        }
+        else {
+            delete newModel;
+            newModel = NULL;
+            newModelState = ModelState_IDLE;
+            if (newModelMetrics != NULL) {
+                delete newModelMetrics;
+            }
+            newModelMetrics = NULL;
+        }
+        if (fedareState == FederateState_DONE) {
+            sendModelToNetwork(*currentModel, *currentModelMetrics);
+            fedareState = FederateState_SUBSCRIBED;
+        }
+    }
 }
 
 // -------------- Unimplemeneted
