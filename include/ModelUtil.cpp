@@ -67,6 +67,12 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
 }
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, DFLOAT learningRateOfWeights, DFLOAT learningRateOfBiases) {
+    if (!LittleFS.begin(false)) {
+        D_println("Error mounting LittleFS");
+        // LittleFS not able to intialize the partition, cannot load from flash and naither save to it later
+        return;
+    }
+
     _layers = new unsigned int[numberOfLayers];
     for (unsigned int i = 0; i < numberOfLayers; i++) {
         _layers[i] = layers[i];
@@ -81,10 +87,19 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
 
     D_println("Booting up...");
 
-    if (!LittleFS.begin(false)) {
-        D_println("Error mounting LittleFS");
-        // LittleFS not able to intialize the partition, cannot load from flash and naither save to it later
-        return;
+    bool configurationLoaded = loadDeviceConfig();
+    bool resumeTraining = false;
+
+    if (configurationLoaded) {
+        if (deviceConfig->currentRound != -1 && deviceConfig->currentFederateState != FederateState_NONE) {
+            currentRound = deviceConfig->currentRound;
+            federateState = deviceConfig->currentFederateState;
+            resumeTraining = true;
+            if (deviceConfig->newModelState != ModelState_IDLE) {
+                // It was not done trainning or it was transmitting or just transmitted before saving
+                newModelState = ModelState_IDLE;
+            }
+        }
     }
 
     if (LittleFS.exists(MODEL_PATH)) {
@@ -92,33 +107,19 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
             delete currentModel;
         }
         currentModel = loadModelFromFlash(MODEL_PATH);
+        if (configurationLoaded) {
+            // Store the reference to the current model metrics since it's store in the heap
+            currentModelMetrics = deviceConfig->currentModelMetrics;
+            deviceConfig->currentModelMetrics = NULL;
+        }
     }
     else {
-        // load layer structure (input, hidden_1, hidden_2, hidden_x, output) and activation functions (ReLU, Softmax etc)
+        if (resumeTraining) {
+            // Code should not be here unless something has gone wrong, but we can still recover be training the model again
+        }
         if (currentModel != NULL) {
             delete currentModel;
         }
-        /* if you want to follow this way, you need to manage the memory of the arrays yourself since the NN object does not copy the values
-        int bsize = 0;
-        int wsize = 0;
-        for (unsigned int i = 1; i < _numberOfLayers; i++) {
-            bsize += _layers[i];
-        }
-        for (unsigned int i = 1; i < numberOfLayers; i++) {
-            wsize += _layers[i] * _layers[i - 1];
-        }
-        DFLOAT* initialBiases = new DFLOAT[bsize];
-        DFLOAT* initialWeights = new DFLOAT[wsize];
-
-        for (int i = 0; i < bsize; i++) {
-            // initialBiases[i] = 0.1 + (rand() % 10000) / 100000.0;
-            initialBiases[i] = 0.50;
-        }
-        for (int i = 0; i < wsize; i++) {
-            // initialWeights[i] = 0.1 + (rand() % 10000) / 100000.0;
-            initialWeights[i] = 0.25;
-        }*/
-        // currentModel = new NeuralNetwork(_layers, initialWeights, initialBiases, _numberOfLayers, _actvFunctions); // could not figure out a way to set without exploding the gradients
         currentModel = new NeuralNetwork(_layers, _numberOfLayers, _actvFunctions);
         if (_learningRateOfBiases == 0)
             _learningRateOfBiases = currentModel->LearningRateOfBiases;
@@ -128,15 +129,25 @@ void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctio
         currentModel->LearningRateOfWeights = _learningRateOfWeights;
         if (currentModelMetrics != NULL) {
             delete currentModelMetrics;
-        }        D_println("Creating new model...");
-        printMemory();ModelMetrics = trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
-        // metricsCollection->add(currentModelMetrics);
+        }
+        printMemory();
+        currentModelMetrics = trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+        if (saveModelToFlash(*currentModel, MODEL_PATH)) {
+            saveDeviceConfig();
+        }
     }
 
+    if (deviceConfig != NULL) {
+        delete deviceConfig;
+    }
 
     setupMQTT();
 
     ensureConnected();
+
+    if (resumeTraining) {
+        sendMessageToNetwork(FederateCommand_RESUME);
+    }
 
     D_println("Done booting.");
 }
@@ -181,12 +192,10 @@ model* transformDataToModel(Stream& stream) {
     unsigned long startTime = millis();
     JsonDocument doc;
 
-    // ReadLoggingStream loggingStream(stream, Serial);
     // ! This is triggering the Watchdog from ESP32 since it takes a long time to deserialize.
     DeserializationError result = deserializeJson(doc, stream);
     doc.shrinkToFit();
 
-    // DeserializationError result = deserializeJson(doc, stream);
     if (result != DeserializationError::Ok) {
         D_println(result.code());
         D_println("JSON failed to deserialize");
@@ -242,7 +251,7 @@ model* transformDataToModel(Stream& stream) {
     m->weights = weight;
     m->parsingTime = millis() - startTime;
     m->round = -1;
-    if (doc.containsKey("round")) {
+    if (doc["round"].is<int>()) {
         m->round = doc["round"].as<int>();
     }
     printTiming();
@@ -409,7 +418,7 @@ void setupMQTT() {
 
             if (strcmp(command, "request_model") == 0) {
                 sendModelToNetwork(*currentModel, *currentModelMetrics);
-                if (fedareState == FederateState_TRAINING) {
+                if (federateState == FederateState_TRAINING) {
                     if (newModel != NULL)
                         delete newModel;
                     if (newModelMetrics != NULL)
@@ -417,30 +426,43 @@ void setupMQTT() {
                     newModelState = ModelState_IDLE;
                 }
             } else if (strcmp(command, "federate_join") == 0) {
-                if (fedareState == FederateState_NONE) {
-                    fedareState = FederateState_SUBSCRIBED;
+                if (federateState == FederateState_NONE) {
+                    federateState = FederateState_SUBSCRIBED;
+                    saveDeviceConfig();
                     sendMessageToNetwork(FederateCommand_JOIN);
                 }
             } else if (strcmp(command, "federate_unsubscribe") == 0) {
-                if (fedareState != FederateState_NONE) {
-                    fedareState = FederateState_NONE;
+                if (federateState != FederateState_NONE) {
+                    federateState = FederateState_NONE;
                     currentRound = -1;
                     sendMessageToNetwork(FederateCommand_LEAVE);
                 }
             } else if (strcmp(command, "federate_start") == 0) {
-                if (fedareState == FederateState_SUBSCRIBED) {
-                    fedareState = FederateState_TRAINING;
+                if (federateState == FederateState_SUBSCRIBED) {
+                    federateState = FederateState_TRAINING;
                     currentRound = 0;
+                    saveDeviceConfig();
                     sendModelToNetwork(*currentModel, *currentModelMetrics);
                 }
             } else if (strcmp(command, "federate_end") == 0) {
-                if (fedareState != FederateState_NONE) {
-                    fedareState = FederateState_DONE;
+                if (federateState != FederateState_NONE) {
+                    federateState = FederateState_DONE;
                     currentRound = -1;
+                }
+            } else if (strcmp(command, "federate_stop") == 0) {
+                const char* client = doc["client"];
+                if (strcmp(client, CLIENT_NAME) == 0) {
+                    federateState = FederateState_DONE;
+                    currentRound = -1;
+                }
+            } else if (strcmp(command, "federate_resume") == 0) {
+                const char* client = doc["client"];
+                if (strcmp(client, CLIENT_NAME) == 0) {
+                    D_println("Resuming training...");
                 }
             }
         }
-        });
+    });
 
     mqtt.subscribe(MQTT_RECEIVE_TOPIC, [](const char* topic, Stream& stream) {
         printMemory();
@@ -466,6 +488,7 @@ void setupMQTT() {
             newModel->LearningRateOfBiases = _learningRateOfBiases;
             newModel->LearningRateOfWeights = _learningRateOfWeights;
             newModelState = ModelState_READY_TO_TRAIN;
+            saveDeviceConfig();
         } else {
             if (mm != NULL) {
                 delete mm;
@@ -482,7 +505,43 @@ void setupMQTT() {
             newModelState = ModelState_IDLE;
             D_println("Error parsing model");
         }
-        });
+    });
+
+    mqtt.subscribe(MQTT_RESUME_TOPIC, [](const char* topic, Stream& stream) {
+        newModelState = ModelState_MODEL_BUSY;
+        model* mm = transformDataToModel(stream);
+        if (mm != NULL && mm->biases != NULL && mm->weights != NULL) {
+            if (tempModel != NULL) {
+                delete tempModel;
+            }
+            if (newModel != NULL) {
+                delete newModel;
+            }
+            tempModel = mm;
+            D_println("Model parsed successfully...");
+            newModel = new NeuralNetwork(_layers, tempModel->weights, tempModel->biases, _numberOfLayers, _actvFunctions);
+            newModel->LearningRateOfBiases = _learningRateOfBiases;
+            newModel->LearningRateOfWeights = _learningRateOfWeights;
+            newModelState = ModelState_READY_TO_TRAIN;
+            federateState = FederateState_TRAINING;
+            mqtt.unsubscribe(MQTT_RESUME_TOPIC);
+        } else {
+            if (mm != NULL) {
+                delete mm;
+            }
+            if (tempModel != NULL) {
+                delete tempModel;
+            }
+            if (newModel != NULL) {
+                delete newModel;
+            }
+            mm = NULL;
+            tempModel = NULL;
+            newModel = NULL;
+            newModelState = ModelState_IDLE;
+            D_println("Error parsing model");
+        }
+    });
 }
 
 bool connectToWifi(bool forever) {
@@ -518,11 +577,14 @@ void sendMessageToNetwork(FederateCommand command) {
         return;
     }
 
+    D_println("Sending command to the network...");
+
     JsonDocument doc;
 
     switch (command)
     {
-    case FederateCommand_JOIN:
+    case FederateCommand_JOIN: {
+
         doc["command"] = "join";
         doc["client"] = CLIENT_NAME;
         doc["metrics"] = JsonObject();
@@ -546,6 +608,19 @@ void sendMessageToNetwork(FederateCommand command) {
         serializeJson(doc, publish);
         publish.send();
         break;
+    }
+    case FederateCommand_RESUME: {
+
+        D_println("Send command to resume training...");
+
+        doc["command"] = "resume";
+        doc["client"] = CLIENT_NAME;
+        doc["round"] = currentRound;
+        auto publishResume = mqtt.begin_publish(MQTT_SEND_COMMANDS_TOPIC, measureJson(doc));
+        serializeJson(doc, publishResume);
+        publishResume.send();
+        break;
+    }
     }
 }
 
@@ -760,7 +835,7 @@ void processModel() {
         newModelMetrics = trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
         newModelMetrics->parsingTime = tempModel->parsingTime;
         newModelState = ModelState_DONE_TRAINING;
-        if (fedareState == FederateState_TRAINING) {
+        if (federateState == FederateState_TRAINING) {
             sendModelToNetwork(*newModel, *newModelMetrics);
             if (newModelMetrics != NULL) {
                 delete newModelMetrics;
@@ -798,11 +873,108 @@ void processModel() {
             }
             newModelMetrics = NULL;
         }
-        if (fedareState == FederateState_DONE) {
+        if (federateState == FederateState_DONE) {
             sendModelToNetwork(*currentModel, *currentModelMetrics);
-            fedareState = FederateState_SUBSCRIBED;
+            federateState = FederateState_SUBSCRIBED;
         }
     }
+}
+
+bool loadDeviceConfig() {
+    D_println("Loading configuration...");
+    if (!LittleFS.exists(CONFIGURATION_PATH)) {
+        return false;
+    }
+
+    File configFile = LittleFS.open(CONFIGURATION_PATH, "r");
+    if (!configFile) {
+        return false;
+    }
+    JsonDocument doc;
+    // ReadLoggingStream loggingStream(configFile, Serial);
+    DeserializationError error = deserializeJson(doc, configFile);
+    configFile.close();
+    if (error) {
+        return false;
+    }
+    if (deviceConfig != NULL) {
+        delete deviceConfig;
+    }
+    deviceConfig = new DeviceConfig;
+    deviceConfig->currentRound = doc["currentRound"] | -1;
+    deviceConfig->currentFederateState = static_cast<FederateState>(doc["federateState"] | FederateState_NONE);
+    deviceConfig->newModelState = static_cast<ModelState>(doc["modelState"] | ModelState_IDLE);
+
+    deviceConfig->currentModelMetrics = new multiClassClassifierMetrics;
+    deviceConfig->currentModelMetrics->numberOfClasses = doc["metrics"]["numberOfClasses"] | 0;
+    deviceConfig->currentModelMetrics->epochs = doc["metrics"]["epochs"] | 0;
+    deviceConfig->currentModelMetrics->meanSqrdError = doc["metrics"]["meanSqrdError"] | 0;
+    deviceConfig->currentModelMetrics->trainingTime = doc["timings"]["training"] | 0;
+    deviceConfig->currentModelMetrics->parsingTime = doc["timings"]["parsing"] | 0;
+    deviceConfig->currentModelMetrics->metrics = new classClassifierMetricts[deviceConfig->currentModelMetrics->numberOfClasses];
+    for (int i = 0; i < deviceConfig->currentModelMetrics->numberOfClasses; i++) {
+        deviceConfig->currentModelMetrics->metrics[i].truePositives = doc["metrics"]["truePositives"][i] | 0;
+        deviceConfig->currentModelMetrics->metrics[i].falsePositives = doc["metrics"]["falsePositives"][i] | 0;
+        deviceConfig->currentModelMetrics->metrics[i].trueNegatives = doc["metrics"]["trueNegatives"][i] | 0;
+        deviceConfig->currentModelMetrics->metrics[i].falseNegatives = doc["metrics"]["falseNegatives"][i] | 0;
+    }
+
+    if (false) {
+
+        D_println("Current round: " + String(deviceConfig->currentRound));
+        D_println("Current federate state: " + String(deviceConfig->currentFederateState));
+        D_println("New model state: " + String(deviceConfig->newModelState));
+        D_println("Current model metrics: ");
+        D_println("Number of classes: " + String(deviceConfig->currentModelMetrics->numberOfClasses));
+        D_println("Epochs: " + String(deviceConfig->currentModelMetrics->epochs));
+        D_println("Mean squared error: " + String(deviceConfig->currentModelMetrics->meanSqrdError));
+        D_println("Training time: " + String(deviceConfig->currentModelMetrics->trainingTime));
+        D_println("Parsing time: " + String(deviceConfig->currentModelMetrics->parsingTime));
+        for (int i = 0; i < deviceConfig->currentModelMetrics->numberOfClasses; i++) {
+            D_println("Class " + String(i) + ": ");
+            D_println("True positives: " + String(deviceConfig->currentModelMetrics->metrics[i].truePositives));
+            D_println("False positives: " + String(deviceConfig->currentModelMetrics->metrics[i].falsePositives));
+            D_println("True negatives: " + String(deviceConfig->currentModelMetrics->metrics[i].trueNegatives));
+            D_println("False negatives: " + String(deviceConfig->currentModelMetrics->metrics[i].falseNegatives));
+        }
+    }
+
+    D_println("Configuration loaded successfully");
+    
+    return true;
+}
+
+bool saveDeviceConfig() {
+    File configFile = LittleFS.open(CONFIGURATION_PATH, "w");
+    if (!configFile) return false;
+    JsonDocument doc;
+    
+    doc["currentRound"] = currentRound;
+    doc["federateState"] = federateState;
+    doc["modelState"] = newModelState;
+    doc["metrics"] = JsonObject();
+    doc["metrics"]["numberOfClasses"] = currentModelMetrics ? currentModelMetrics->numberOfClasses : 0;
+    doc["metrics"]["epochs"] = currentModelMetrics ? currentModelMetrics->epochs : 0;
+    doc["metrics"]["meanSqrdError"] = currentModelMetrics ? currentModelMetrics->meanSqrdError : 0;
+    doc["metrics"]["trainingTime"] = currentModelMetrics ? currentModelMetrics->trainingTime : 0;
+    doc["metrics"]["parsingTime"] = currentModelMetrics ? currentModelMetrics->parsingTime : 0;
+    for (int i = 0; i < (currentModelMetrics ? currentModelMetrics->numberOfClasses : 0); i++) {
+        doc["metrics"]["truePositives"][i] = currentModelMetrics->metrics[i].truePositives;
+        doc["metrics"]["falsePositives"][i] = currentModelMetrics->metrics[i].falsePositives;
+        doc["metrics"]["trueNegatives"][i] = currentModelMetrics->metrics[i].trueNegatives;
+        doc["metrics"]["falseNegatives"][i] = currentModelMetrics->metrics[i].falseNegatives;
+    }
+
+    bool result = serializeJson(doc, configFile) > 0;
+    configFile.close();
+
+    if (!result) {
+        D_println("Failed to save configuration");
+    } else {
+        D_println("Configuration saved successfully");
+    }
+    
+    return result;
 }
 
 // -------------- Unimplemeneted

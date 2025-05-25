@@ -29,6 +29,7 @@ void printInstructions() {
   Serial.println("7. Read test Data and Predict from Current Model");
   Serial.println("8. Print Memory usage");
   Serial.println("9. Delete Model");
+  Serial.println("10. Delete Configuration");
   Serial.println("11. Print New Model");
   Serial.println("12. Train New Model");
   Serial.println("13. Save New Model");
@@ -93,6 +94,9 @@ void parseSerial() {
       LittleFS.exists(MODEL_PATH) ? LittleFS.remove(MODEL_PATH) : Serial.println("Model not found");
       break;
     }
+    case 10:
+      LittleFS.exists(CONFIGURATION_PATH) ? LittleFS.remove(CONFIGURATION_PATH) : Serial.println("Configuration not found");
+      break;
     case 11:
       newModel->print();
       break;
@@ -116,6 +120,12 @@ void parseSerial() {
       break;
     case 19:
     LittleFS.exists(NEW_MODEL_PATH) ? LittleFS.remove(NEW_MODEL_PATH) : Serial.println("Model not found");
+      break;
+    case 20:
+      federateState = FederateState_NONE;
+      currentRound = -1;
+      newModelState = ModelState_IDLE;
+      saveDeviceConfig();
       break;
     case 99:
       printInstructions();

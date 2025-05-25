@@ -34,6 +34,7 @@
 #define MODEL_PATH "/model.nn"
 #define NEW_MODEL_PATH "/new_model.nn"
 #define TEMPORARY_NEW_MODEL_PATH "/new_model_temp.nn"
+#define CONFIGURATION_PATH "/config.json"
 #define X_TRAIN_PATH "/x_train_1.csv"
 #define Y_TRAIN_PATH "/y_train_1.csv"
 #define X_TEST_PATH "/x_test_1.csv"
@@ -42,13 +43,14 @@
 #define CLIENT_NAME "esp01"
 #define MQTT_PUBLISH_TOPIC "esp32/fl/model/push"
 #define MQTT_RECEIVE_TOPIC "esp32/fl/model/pull"
+#define MQTT_RESUME_TOPIC "esp32/fl/model/resume"
 #define MQTT_RECEIVE_COMMANDS_TOPIC "esp32/fl/commands/pull"
 #define MQTT_SEND_COMMANDS_TOPIC "esp32/fl/commands/push"
 // #define BATCH_SIZE 8
 #define EPOCHS 1
-#define WIFI_SSID "Redmi Note 8"
+#define WIFI_SSID "PedroRapha"
 #define WIFI_PASSWORD "456123789a"
-#define MQTT_BROKER "192.168.43.235"
+#define MQTT_BROKER "192.168.15.9"
 // #define MQTT_MESSAGE_SIZE 500
 #define CONNECTION_TIMEOUT 30000 // in miliseconds
 
@@ -244,6 +246,7 @@ struct testData {
 
 enum ModelState {
     ModelState_IDLE,
+    ModelState_WAITING_DOWNLOAD,
     ModelState_READY_TO_TRAIN,
     ModelState_DONE_TRAINING,
     ModelState_MODEL_BUSY,
@@ -253,21 +256,44 @@ enum FederateState {
     FederateState_NONE,
     FederateState_SUBSCRIBED,
     FederateState_TRAINING,
-    FederateState_DONE
+    FederateState_DONE,
 };
 
 enum FederateCommand {
     FederateCommand_JOIN,
     FederateCommand_READY,
     FederateCommand_LEAVE,
+    FederateCommand_RESUME,
+};
+
+struct DeviceConfig {
+    int currentRound = -1;
+    FederateState currentFederateState = FederateState_NONE;
+    ModelState newModelState = ModelState_IDLE;
+    multiClassClassifierMetrics* currentModelMetrics = nullptr;
+
+    void reset() {
+        currentRound = -1;
+        currentFederateState = FederateState_NONE;
+        newModelState = ModelState_IDLE;
+        if (currentModelMetrics != nullptr) {
+            delete currentModelMetrics;
+            currentModelMetrics = nullptr;
+        }
+    }
+
+    ~DeviceConfig() {
+        reset();
+    }
 };
 
 ModelState newModelState = ModelState_IDLE;
-FederateState fedareState = FederateState_NONE;
+FederateState federateState = FederateState_NONE;
 NeuralNetwork* newModel = NULL;
 NeuralNetwork* currentModel = NULL;
 multiClassClassifierMetrics* currentModelMetrics = NULL;
 multiClassClassifierMetrics* newModelMetrics = NULL;
+DeviceConfig* deviceConfig = NULL;
 
 void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions);
 
@@ -300,5 +326,11 @@ bool connectToServerMQTT();
 void processModel();
 
 bool compareMetrics(multiClassClassifierMetrics* oldMetrics, multiClassClassifierMetrics* newMetrics);
+
+bool loadDeviceConfig();
+
+bool saveDeviceConfig();
+
+void clearDeviceConfig();
 
 #endif /* MODELUTIL_H_ */
