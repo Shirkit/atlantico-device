@@ -6,19 +6,20 @@
 #define DEBUG 1 // SET TO 0 OUT TO REMOVE TRACES
 
 #define ACTIVATION__PER_LAYER
-// #define Sigmoid
+#define Sigmoid //[default] No need definition, for single activation across network
 #define Tanh
-// #define ReLU
+#define ReLU
+#define LeakyReLU
+#define ELU
+#define SELU
 #define Softmax
-// #define LeakyReLU
-// #define ELU
-// #define SELU
 
 #include "ModelUtil.cpp"
 #include <esp_task_wdt.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 void printInstructions() {
-  Serial.println(CLIENT_NAME);
   Serial.println("Choose an option to coninue:");
   Serial.println("1. Print Model");
   Serial.println("2. Train Model");
@@ -54,7 +55,7 @@ void parseSerial() {
       if (currentModelMetrics != NULL) {
         delete currentModelMetrics;
       }
-      currentModelMetrics = trainModelFromOriginalDataset(*currentModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+      currentModelMetrics = trainModelFromOriginalDataset(*currentModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
       break;
     case 3:
       saveModelToFlash(*currentModel, MODEL_PATH);
@@ -69,9 +70,9 @@ void parseSerial() {
       currentModelMetrics->print();
       break;
     case 7: {
-      testData* test = readTestData();
+      testData* test = readTestData(localModelConfig);
       if (test != NULL) {
-        DFLOAT* prediction = predictFromCurrentModel(test->x);
+        IDFLOAT* prediction = predictFromCurrentModel(test->x);
         Serial.print("Prediction: ");
         bool correct = true;
         for (int j = 0; j < currentModel->layers[currentModel->numberOflayers - 1]._numberOfOutputs; j++) {
@@ -104,7 +105,7 @@ void parseSerial() {
       if (newModelMetrics != NULL) {
         delete newModelMetrics;
       }
-      newModelMetrics = trainModelFromOriginalDataset(*newModel, X_TRAIN_PATH, Y_TRAIN_PATH);
+      newModelMetrics = trainModelFromOriginalDataset(*newModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
       break;
     case 13:
       saveModelToFlash(*newModel, NEW_MODEL_PATH);
@@ -146,28 +147,44 @@ void processIncomingMessages(void *pvParameters) {
 void setup()
 {
   Serial.begin(115200);
-  D_println(CLIENT_NAME);
   printMemory();
-  randomSeed(10);
-  unsigned int layers[] = { 3, 40, 20, 10, 6 };
-  byte Actv_Functions[] = { 0,  0,  0,  1 };
-  bootUp(layers, NumberOf(layers), Actv_Functions, 0.11f / 8.0f, 0.022f / 8.0f);
+  fixedMemoryUsage.onBoot = info.total_free_bytes;
+  unsigned int* layers = new unsigned int[5] { 3, 40, 20, 10, 6 };
+  byte* Actv_Functions = new byte[4] { 1,  1,  1,  6 };
+  
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+
+  localModelConfig = new ModelConfig(layers, 5, Actv_Functions, 1, 10, 0.3333f / 12.0f, 0.06666f / 12.0f);
+  
+  randomSeed(localModelConfig->randomSeed);
+  bootUp(false);
   printMemory();
   printInstructions();
 
-  esp_task_wdt_init(10000, true);
+  esp_task_wdt_init(30000, true);
 
   xTaskCreatePinnedToCore(
     processIncomingMessages, /* Function to implement the task */
     "Atlantico Device", /* Name of the task */
-    10000 , /* Stack size in bytes */
+    5000 , /* Stack size in bytes */
     NULL, /* Task input parameter */
     1, /* Priority of the task */
     NULL, /* Task handle. */
     0); /* Core where the task should run, 0 is the OS, 1 is the app */
   // xTaskCreate(processIncomingMessages, "Background Message Processing Task", 2000, NULL, 1, NULL);
   // xSemaphoreCurrentModel = xSemaphoreCreateMutex();
+
   printMemory();
+
+  fixedMemoryUsage.afterFullSetup = info.total_free_bytes;
+  fixedMemoryUsage.minFreeHeapAfterSetup = info.minimum_free_bytes;
+
+  D_println(fixedMemoryUsage.onBoot);
+  D_println(fixedMemoryUsage.loadConfig);
+  D_println(fixedMemoryUsage.loadAndTrainModel);
+  D_println(fixedMemoryUsage.connectionMade);
+  D_println(fixedMemoryUsage.afterFullSetup);
+  D_println(fixedMemoryUsage.minFreeHeapAfterSetup);
 }
 
 void loop()

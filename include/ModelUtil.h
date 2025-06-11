@@ -35,19 +35,19 @@
 #define NEW_MODEL_PATH "/new_model.nn"
 #define TEMPORARY_NEW_MODEL_PATH "/new_model_temp.nn"
 #define CONFIGURATION_PATH "/config.json"
-#define X_TRAIN_PATH "/x_train_1.csv"
-#define Y_TRAIN_PATH "/y_train_1.csv"
-#define X_TEST_PATH "/x_test_1.csv"
-#define Y_TEST_PATH "/y_test_1.csv"
+#define DEVICE_DEFINITION_PATH "/device.json"
+#define X_TRAIN_PATH "/x_train.csv"
+#define Y_TRAIN_PATH "/y_train.csv"
+#define X_TEST_PATH "/x_test.csv"
+#define Y_TEST_PATH "/y_test.csv"
 #define GATHERED_DATA_PATH "/data.db"
-#define CLIENT_NAME "esp01"
+// #define CLIENT_NAME "esp01"
 #define MQTT_PUBLISH_TOPIC "esp32/fl/model/push"
+#define MQTT_RAW_PUBLISH_TOPIC "esp32/fl/model/rawpush"
 #define MQTT_RECEIVE_TOPIC "esp32/fl/model/pull"
 #define MQTT_RESUME_TOPIC "esp32/fl/model/resume"
 #define MQTT_RECEIVE_COMMANDS_TOPIC "esp32/fl/commands/pull"
 #define MQTT_SEND_COMMANDS_TOPIC "esp32/fl/commands/push"
-// #define BATCH_SIZE 8
-#define EPOCHS 1
 #define WIFI_SSID "PedroRapha"
 #define WIFI_PASSWORD "456123789a"
 #define MQTT_BROKER "192.168.15.9"
@@ -66,8 +66,8 @@
  */
 
 struct model {
-    DFLOAT *biases;
-    DFLOAT *weights;
+    IDFLOAT *biases;
+    IDFLOAT *weights;
     unsigned long parsingTime = 0;
     int round;
     ~model() {
@@ -255,6 +255,7 @@ enum ModelState {
 enum FederateState {
     FederateState_NONE,
     FederateState_SUBSCRIBED,
+    FederateState_STARTING,
     FederateState_TRAINING,
     FederateState_DONE,
 };
@@ -264,6 +265,37 @@ enum FederateCommand {
     FederateCommand_READY,
     FederateCommand_LEAVE,
     FederateCommand_RESUME,
+    FederateCommand_ALIVE,
+};
+
+struct FixedMemoryUsage {
+    size_t onBoot;
+    size_t loadConfig;
+    size_t loadAndTrainModel;
+    size_t connectionMade;
+    size_t afterFullSetup;
+    size_t minFreeHeapAfterSetup;
+};
+
+struct RoundMemoryUsage {
+    size_t messageReceived;
+    size_t beforeTrain;
+    size_t afterTrain;
+    size_t beforeSend;
+    size_t minimumFree;
+};
+
+struct ModelConfig {
+    unsigned int* layers;
+    unsigned int numberOfLayers;
+    byte* actvFunctions;
+    unsigned int epochs = 1;
+    DFLOAT learningRateOfWeights = 0.3333;
+    DFLOAT learningRateOfBiases = 0.0666;
+    unsigned long randomSeed = 10;
+
+    ModelConfig(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, unsigned int epochs = 1, unsigned long randomSeed = 10, DFLOAT learningRateOfWeights = 0.3333f, DFLOAT learningRateOfBiases = 0.0666f)
+        : layers(layers), numberOfLayers(numberOfLayers), actvFunctions(actvFunctions), epochs(epochs), randomSeed(randomSeed), learningRateOfWeights(learningRateOfWeights), learningRateOfBiases(learningRateOfBiases) {}
 };
 
 struct DeviceConfig {
@@ -271,6 +303,7 @@ struct DeviceConfig {
     FederateState currentFederateState = FederateState_NONE;
     ModelState newModelState = ModelState_IDLE;
     multiClassClassifierMetrics* currentModelMetrics = nullptr;
+    ModelConfig* loadedFederateModelConfig = nullptr;
 
     void reset() {
         currentRound = -1;
@@ -294,10 +327,17 @@ NeuralNetwork* currentModel = NULL;
 multiClassClassifierMetrics* currentModelMetrics = NULL;
 multiClassClassifierMetrics* newModelMetrics = NULL;
 DeviceConfig* deviceConfig = NULL;
+FixedMemoryUsage fixedMemoryUsage = {0, 0, 0, 0, 0, 0};
+RoundMemoryUsage roundMemoryUsage = {0, 0, 0, 0, 0};
+ModelConfig* localModelConfig = NULL;
+ModelConfig* federateModelConfig = NULL;
+char* CLIENT_NAME;
 
-void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions);
+// void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions);
 
-void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, DFLOAT learningRateOfWeights, DFLOAT learningRateOfBiases);
+// void bootUp(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, DFLOAT learningRateOfWeights, DFLOAT learningRateOfBiases);
+
+void bootUp(bool initBaseModel = true);
 
 bool saveModelToFlash(NeuralNetwork& NN, const String file);
 
@@ -305,7 +345,7 @@ NeuralNetwork* loadModelFromFlash(const String& file);
 
 model* transformDataToModel(Stream& stream);
 
-multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, const String& x_file, const String& y_file);
+multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, ModelConfig& config, const String& x_file, const String& y_file);
 
 void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics);
 
@@ -315,9 +355,9 @@ void processMessages();
 
 DFLOAT* predictFromCurrentModel(DFLOAT* x);
 
-testData* readTestData();
+testData* readTestData(ModelConfig modelConfig);
 
-void setupMQTT();
+void setupMQTT(bool resume = false);
 
 bool connectToWifi(bool forever = true);
 
@@ -332,5 +372,9 @@ bool loadDeviceConfig();
 bool saveDeviceConfig();
 
 void clearDeviceConfig();
+
+bool loadDeviceDefinitions();
+
+const char* modelStateToString(ModelState state);
 
 #endif /* MODELUTIL_H_ */
