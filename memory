@@ -1,0 +1,22 @@
+320KB de DRAM
+- Upon program initialization, there is 254KB are available
+  - It's reported 45KB of static memory allocated upon build
+- Around 20KB are taken by all libraries and the OS upon boot up
+- Around 60KB are taken by WiFi and MQTT initialization
+- 10KB are taken by the MQTT Handling Thread
+- Around 5KB are taken by the 1180 neurons model
+- Device running has 181KB of DRAM remaining
+
+273300 bytes
+- mínimo possível carregando a biblioteca
+
+244260 bytes
+- sem inicializar LittleFS
+- sem inicializar modelo
+- limpei o bootUp()
+
+244184 bytes
+- inicializei as variáveis de auxílio
+
+A biblioteca do wifi para conectar consome cerca de 50kb
+Tem 10kb de paralelização da tarefa
