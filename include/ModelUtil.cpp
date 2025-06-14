@@ -404,6 +404,10 @@ void processMessages() {
         ensureConnected();
         if (unsubscribeFromResume) {
             mqtt.unsubscribe(MQTT_RESUME_TOPIC);
+            String topic = String(MQTT_RAW_RESUME_TOPIC);
+            topic.concat("/");
+            topic.concat(CLIENT_NAME);
+            mqtt.unsubscribe(topic);
             D_println("Unsubscribed from resume topic");
             unsubscribeFromResume = false;
         }
@@ -445,6 +449,59 @@ void setupResume() {
                 delete newModel;
             }
             mm = NULL;
+            tempModel = NULL;
+            newModel = NULL;
+            newModelState = ModelState_IDLE;
+            D_println("Error parsing model");
+        }
+    });
+
+    String topic = String(MQTT_RAW_RESUME_TOPIC);
+    topic.concat("/");
+    topic.concat(CLIENT_NAME);
+
+    mqtt.subscribe(topic, [](const char* topic, Stream& stream) {
+        if (newModelState != ModelState_IDLE) {
+            D_println("Already processing a model");
+            return;
+        }
+        newModelState = ModelState_MODEL_BUSY;
+
+        File file = LittleFS.open(TEMPORARY_NEW_MODEL_PATH, "w+");
+        if (!file) {
+            D_println("Error opening file for writing");
+            return;
+        }
+        while (stream.available()) {
+            file.write(stream.read());
+        }
+        file.seek(0);
+
+        if (tempModel != NULL) {
+            delete tempModel;
+        }
+        if (newModel != NULL) {
+            delete newModel;
+        }
+
+        newModel = new NeuralNetwork(localModelConfig->layers, localModelConfig->numberOfLayers, localModelConfig->actvFunctions);
+        newModel->LearningRateOfBiases = localModelConfig->learningRateOfBiases;
+        newModel->LearningRateOfWeights = localModelConfig->learningRateOfWeights;
+        
+        if (newModel->load(file)) {
+            newModelState = ModelState_READY_TO_TRAIN;
+            federateState = FederateState_TRAINING;
+            unsubscribeFromResume = true;
+            D_println("Resume setup done, waiting for training to start...");
+        } else {
+            D_println("Error loading model from file");
+
+            if (tempModel != NULL) {
+                delete tempModel;
+            }
+            if (newModel != NULL) {
+                delete newModel;
+            }
             tempModel = NULL;
             newModel = NULL;
             newModelState = ModelState_IDLE;
@@ -577,6 +634,64 @@ void setupMQTT(bool resume) {
             } else if (strcmp(command, "federate_alive") == 0) {
                 sendMessageToNetwork(FederateCommand_ALIVE);
             }
+        }
+    });
+
+    mqtt.subscribe(MQTT_RAW_RECEIVE_TOPIC, [](const char* topic, Stream& stream) {
+        unsigned long startTime = millis();
+        printMemory();
+        roundMemoryUsage.messageReceived = info.total_free_bytes;
+        if (newModelState != ModelState_IDLE) {
+            D_println("Already processing a model");
+            return;
+        }
+        newModelState = ModelState_MODEL_BUSY;
+        File file = LittleFS.open(TEMPORARY_NEW_MODEL_PATH, "w+");
+        if (!file) {
+            D_println("Error opening file for writing");
+            return;
+        }
+        while (stream.available()) {
+            file.write(stream.read());
+        }
+        file.seek(0);
+
+        if (federateState == FederateState_NONE) {
+            newModel = new NeuralNetwork(localModelConfig->layers, localModelConfig->numberOfLayers, localModelConfig->actvFunctions);
+            newModel->LearningRateOfBiases = localModelConfig->learningRateOfBiases;
+            newModel->LearningRateOfWeights = localModelConfig->learningRateOfWeights;
+        } else {
+            newModel = new NeuralNetwork(federateModelConfig->layers, federateModelConfig->numberOfLayers, federateModelConfig->actvFunctions);
+            newModel->LearningRateOfBiases = federateModelConfig->learningRateOfBiases;
+            newModel->LearningRateOfWeights = federateModelConfig->learningRateOfWeights;
+        }
+
+        if (newModel->load(file)) {
+            D_println("Model loaded successfully from file");
+            if (tempModel != NULL) {
+                delete tempModel;
+            }
+            tempModel = new model;
+            tempModel->parsingTime = millis() - startTime;
+            currentRound++;
+
+            newModelState = ModelState_READY_TO_TRAIN;
+            saveDeviceConfig();
+            D_println("New model ready to train");
+
+        } else {
+            D_println("Error loading model from file");
+
+            if (tempModel != NULL) {
+                delete tempModel;
+            }
+            if (newModel != NULL) {
+                delete newModel;
+            }
+            tempModel = NULL;
+            newModel = NULL;
+            newModelState = ModelState_IDLE;
+            D_println("Error parsing model");
         }
     });
 
