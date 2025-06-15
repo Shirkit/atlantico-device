@@ -1,0 +1,83 @@
+{
+  "enabled": true,
+  "theme": "default",
+  "themes": {
+    "default": {
+      "log_levels": {
+        "ERROR": "\u001b[31m",
+        "WARN": "\u001b[33m", 
+        "INFO": "\u001b[32m",
+        "DEBUG": "\u001b[36m",
+        "TRACE": "\u001b[35m"
+      },
+      "components": {
+        "timestamp": "\u001b[90m",
+        "filename": "\u001b[90m",
+        "function": "\u001b[90m",
+        "message": "\u001b[37m",
+        "reset": "\u001b[0m"
+      },
+      "patterns": {
+        "brackets": "\u001b[90m",
+        "separators": "\u001b[90m"
+      }
+    },
+    "dark": {
+      "log_levels": {
+        "ERROR": "\u001b[91m",
+        "WARN": "\u001b[93m",
+        "INFO": "\u001b[92m", 
+        "DEBUG": "\u001b[96m",
+        "TRACE": "\u001b[95m"
+      },
+      "components": {
+        "timestamp": "\u001b[37m",
+        "filename": "\u001b[38;5;244m",
+        "function": "\u001b[38;5;244m",
+        "message": "\u001b[37m",
+        "reset": "\u001b[0m"
+      },
+      "patterns": {
+        "brackets": "\u001b[38;5;244m",
+        "separators": "\u001b[38;5;244m"
+      }
+    },
+    "light": {
+      "log_levels": {
+        "ERROR": "\u001b[31m",
+        "WARN": "\u001b[33m",
+        "INFO": "\u001b[34m",
+        "DEBUG": "\u001b[36m", 
+        "TRACE": "\u001b[35m"
+      },
+      "components": {
+        "timestamp": "\u001b[30m",
+        "filename": "\u001b[90m",
+        "function": "\u001b[90m", 
+        "message": "\u001b[30m",
+        "reset": "\u001b[0m"
+      },
+      "patterns": {
+        "brackets": "\u001b[90m",
+        "separators": "\u001b[90m"
+      }
+    }
+  },
+  "custom_patterns": [
+    {
+      "pattern": "\\[WiFi\\]",
+      "color": "\u001b[34m",
+      "description": "WiFi related messages"
+    },
+    {
+      "pattern": "\\[MQTT\\]", 
+      "color": "\u001b[35m",
+      "description": "MQTT related messages"
+    },
+    {
+      "pattern": "\\[FL\\]",
+      "color": "\u001b[33m",
+      "description": "Federated Learning messages"
+    }
+  ]
+}
