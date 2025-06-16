@@ -113,7 +113,6 @@
 #define MODEL_PATH "/model.nn"
 #define NEW_MODEL_PATH "/new_model.nn"
 #define TEMPORARY_NEW_MODEL_PATH "/new_model_temp.nn"
-#define CURRENT_MODEL_CACHE_PATH "/model_cache.nn"
 #define CONFIGURATION_PATH "/config.json"
 #define DEVICE_DEFINITION_PATH "/device.json"
 #define X_TRAIN_PATH "/x_train.csv"

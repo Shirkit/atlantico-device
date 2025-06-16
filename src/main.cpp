@@ -14,19 +14,9 @@ DeviceManager* deviceManager;
 SerialInterface* serialInterface;
 
 void processIncomingMessages(void *pvParameters) {
-    // This task is now replaced by TaskCoordinator's communication task
-    // Keep it simple - just handle legacy message processing if TaskCoordinator isn't ready
     while (true) {
-        if (deviceManager && deviceManager->getTaskCoordinator()) {
-            // TaskCoordinator is handling messages, this task can exit
-            LOG_INFO("TaskCoordinator active - ending legacy message processing task");
-            vTaskDelete(NULL);
-            return;
-        } else {
-            // Fallback message processing
-            deviceManager->processMessages();
-        }
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        deviceManager->processMessages();
+        vTaskDelay(100 / portTICK_PERIOD_MS); // Yield to other OS tasks
     }
 }
 
@@ -61,7 +51,7 @@ void setup() {
     
     // Initialize serial interface
     serialInterface = new SerialInterface(deviceManager);
-    // serialInterface->printInstructions();
+    serialInterface->printInstructions();
     
     // Configure watchdog timer
     esp_task_wdt_init(30000, true);
@@ -85,29 +75,11 @@ void setup() {
 }
 
 void loop() {
-    // Check if TaskCoordinator is running
-    if (deviceManager && deviceManager->getTaskCoordinator()) {
-        // TaskCoordinator is handling model processing via federation task
-        // Only handle serial commands here
-        serialInterface->processSerial();
-        
-        // Monitor task health (with cooldown to prevent infinite loop)
-        static unsigned long lastHealthCheck = 0;
-        if (millis() - lastHealthCheck > 5000) {  // Check every 5 seconds
-            if (!deviceManager->getTaskCoordinator()->areTasksHealthy()) {
-                LOG_ERROR("Tasks unhealthy - transitioning to error state");
-                deviceManager->transitionToState(DEVICE_ERROR);
-            }
-            lastHealthCheck = millis();  // Always update cooldown
-        }
-        
-        // Add a small delay to prevent busy loop
-        delay(10);
-    } else {
-        // Fallback to legacy processing if TaskCoordinator isn't ready
-        deviceManager->processModel();
-        serialInterface->processSerial();
-    }
+    // Process model state machine
+    deviceManager->processModel();
+    
+    // Handle serial commands
+    serialInterface->processSerial();
     
     // Small delay to prevent watchdog issues
     delay(10);

@@ -72,29 +72,12 @@ enum ModelState {
     ModelState_MODEL_BUSY,
 };
 
-// Legacy enum - will be replaced by DeviceState and FederateStatus
 enum FederateState {
     FederateState_NONE,
     FederateState_SUBSCRIBED,
     FederateState_STARTING,
     FederateState_TRAINING,
     FederateState_DONE,
-};
-
-// New state machine enums
-enum DeviceState {
-    DEVICE_INITIALIZING,    // Booting up, loading config, connecting
-    INFERENCE_MODE,         // Running inference on local model
-    FEDERATION_TRAINING,    // Actively training federation model
-    FEDERATION_RECOVERY,    // Attempting to recover from federation error
-    DEVICE_ERROR           // Error state requiring intervention
-};
-
-enum FederateStatus {
-    FEDERATE_NONE,         // Not participating in federation
-    FEDERATE_SUBSCRIBED,   // Subscribed and waiting for training
-    FEDERATE_TRAINING,     // Actively training
-    FEDERATE_ENDING        // Training completed, sending results
 };
 
 enum FederateCommand {
