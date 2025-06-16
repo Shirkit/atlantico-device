@@ -15,6 +15,12 @@ private:
     ModelConfig* localModelConfig;
     ModelConfig* federateModelConfig;
     
+    // Model caching for inference/federation switching
+    NeuralNetwork* cachedInferenceModel;
+    multiClassClassifierMetrics* cachedInferenceMetrics;
+    bool inferenceModelCached;
+    String inferenceModelPath;
+    
     unsigned long datasetSize;
 
 public:
@@ -41,6 +47,17 @@ public:
     
     // Model comparison
     bool compareMetrics(multiClassClassifierMetrics* oldMetrics, multiClassClassifierMetrics* newMetrics);
+    
+    // Model caching for inference/federation switching
+    bool cacheInferenceModel();
+    bool restoreInferenceModel();
+    void clearInferenceCache();
+    bool hasInferenceCache() const { return inferenceModelCached; }
+    
+    // State-based model management
+    bool prepareForFederationTraining();
+    bool restoreFromFederationTraining();
+    bool isInferenceModelAvailable() const;
     
     // Getters
     NeuralNetwork* getCurrentModel() { return currentModel; }

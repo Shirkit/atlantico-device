@@ -9,6 +9,13 @@ ModelManager::ModelManager() {
     newModelMetrics = nullptr;
     localModelConfig = nullptr;
     federateModelConfig = nullptr;
+    
+    // Initialize caching variables
+    cachedInferenceModel = nullptr;
+    cachedInferenceMetrics = nullptr;
+    inferenceModelCached = false;
+    inferenceModelPath = CURRENT_MODEL_CACHE_PATH;
+    
     datasetSize = 0;
 }
 
@@ -41,6 +48,9 @@ void ModelManager::cleanupModels() {
         delete federateModelConfig;
         federateModelConfig = nullptr;
     }
+    
+    // Clean up cached models
+    clearInferenceCache();
 }
 
 void ModelManager::initializeModels(bool initBaseModel) {
@@ -360,4 +370,143 @@ void ModelManager::setNewModelMetrics(multiClassClassifierMetrics* metrics) {
         delete newModelMetrics;
     }
     newModelMetrics = metrics;
+}
+
+bool ModelManager::cacheInferenceModel() {
+    if (!currentModel) {
+        LOG_WARN("No current model to cache");
+        return false;
+    }
+    
+    LOG_INFO("Caching inference model for federation training");
+    
+    // Save current model to flash cache
+    auto result = saveModelToFlash(*currentModel, inferenceModelPath);
+    if (result.isError()) {
+        LOG_ERROR_CODE(result.errorCode, "Failed to cache inference model: %s", result.message);
+        return false;
+    }
+    
+    // Cache metrics in memory
+    if (cachedInferenceMetrics) {
+        delete cachedInferenceMetrics;
+    }
+    
+    if (currentModelMetrics) {
+        cachedInferenceMetrics = new multiClassClassifierMetrics();
+        *cachedInferenceMetrics = *currentModelMetrics;
+    }
+    
+    // Mark as cached
+    inferenceModelCached = true;
+    
+    LOG_INFO("Inference model cached successfully");
+    return true;
+}
+
+bool ModelManager::restoreInferenceModel() {
+    if (!inferenceModelCached) {
+        LOG_WARN("No cached inference model to restore");
+        return false;
+    }
+    
+    LOG_INFO("Restoring cached inference model");
+    
+    // Load model from flash cache
+    auto restoredModel = loadModelFromFlash(inferenceModelPath);
+    if (!restoredModel) {
+        LOG_ERROR("Failed to load cached inference model from flash");
+        return false;
+    }
+    
+    // Replace current model
+    if (currentModel) {
+        delete currentModel;
+    }
+    currentModel = restoredModel;
+    
+    // Restore metrics
+    if (currentModelMetrics) {
+        delete currentModelMetrics;
+    }
+    if (cachedInferenceMetrics) {
+        currentModelMetrics = new multiClassClassifierMetrics();
+        *currentModelMetrics = *cachedInferenceMetrics;
+    }
+    
+    LOG_INFO("Inference model restored successfully");
+    return true;
+}
+
+void ModelManager::clearInferenceCache() {
+    if (cachedInferenceModel) {
+        delete cachedInferenceModel;
+        cachedInferenceModel = nullptr;
+    }
+    if (cachedInferenceMetrics) {
+        delete cachedInferenceMetrics;
+        cachedInferenceMetrics = nullptr;
+    }
+    
+    // Remove cache file from flash
+    if (LittleFS.exists(inferenceModelPath)) {
+        LittleFS.remove(inferenceModelPath);
+    }
+    
+    inferenceModelCached = false;
+    LOG_INFO("Inference model cache cleared");
+}
+
+bool ModelManager::prepareForFederationTraining() {
+    LOG_INFO("Preparing ModelManager for federation training");
+    
+    // Cache the current inference model if available
+    if (currentModel && !inferenceModelCached) {
+        if (!cacheInferenceModel()) {
+            LOG_ERROR("Failed to cache inference model");
+            return false;
+        }
+    }
+    
+    // Clean up current model to free memory for federation training
+    if (currentModel) {
+        delete currentModel;
+        currentModel = nullptr;
+    }
+    if (currentModelMetrics) {
+        delete currentModelMetrics;
+        currentModelMetrics = nullptr;
+    }
+    
+    LOG_INFO("ModelManager prepared for federation training");
+    return true;
+}
+
+bool ModelManager::restoreFromFederationTraining() {
+    LOG_INFO("Restoring ModelManager from federation training");
+    
+    // Clean up federation model
+    if (newModel) {
+        delete newModel;
+        newModel = nullptr;
+    }
+    if (newModelMetrics) {
+        delete newModelMetrics;
+        newModelMetrics = nullptr;
+    }
+    
+    // Restore cached inference model
+    if (inferenceModelCached) {
+        if (!restoreInferenceModel()) {
+            LOG_ERROR("Failed to restore cached inference model");
+            return false;
+        }
+    }
+    
+    LOG_INFO("ModelManager restored from federation training");
+    return true;
+}
+
+bool ModelManager::isInferenceModelAvailable() const {
+    return (currentModel != nullptr || inferenceModelCached);
 }

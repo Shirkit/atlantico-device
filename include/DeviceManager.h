@@ -5,7 +5,10 @@
 #include "Types.h"
 #include "ModelManager.h"
 #include "NetworkManager.h"
+#include "StateMachine.h"
+#include "TaskCoordinator.h"
 #include <LittleFS.h>
+#include <ArduinoJson.h>
 
 #if USE_ADVANCED_LOGGER
 #include "Logger.h"
@@ -18,7 +21,11 @@ private:
     ModelManager* modelManager;
     NetworkManager* networkManager;
     
-    // State variables
+    // New state machine architecture
+    StateMachine* stateMachine;
+    TaskCoordinator* taskCoordinator;
+    
+    // Legacy state variables (for compatibility during transition)
     ModelState newModelState;
     FederateState federateState;
     int currentRound;
@@ -43,9 +50,22 @@ public:
     ErrorResult loadDeviceConfig();
     ErrorResult saveDeviceConfig();
     
-    // Main processing
+    // State machine integration
+    bool initializeStateMachine();
+    bool startTaskCoordinator();
+    void updateDeviceState();
+    bool transitionToState(DeviceState newState);
+    bool updateFederationStatus(FederateStatus newStatus);
+    
+    // Main processing (refactored to work with task coordinator)
     void processModel();
     void processMessages();
+    
+    // Federation control methods
+    bool startFederationTraining();
+    bool stopFederationTraining();
+    bool handleFederationCommand(const char* command, JsonDocument& doc);
+    void resetFederationState();
     
     // Memory and debugging
     void printMemory();
@@ -58,9 +78,19 @@ public:
     NetworkManager* getNetworkManager() { return networkManager; }
     DeviceConfig* getDeviceConfig() { return deviceConfig; }
     const char* getClientName() { return clientName; }
+    
+    // State machine access
+    StateMachine* getStateMachine() { return stateMachine; }
+    TaskCoordinator* getTaskCoordinator() { return taskCoordinator; }
+    
+    // Legacy state getters (for compatibility)
     ModelState getNewModelState() { return newModelState; }
     FederateState getFederateState() { return federateState; }
     int getCurrentRound() { return currentRound; }
+    
+    // New state getters
+    DeviceState getCurrentDeviceState() { return stateMachine ? stateMachine->getCurrentState() : DEVICE_INITIALIZING; }
+    FederateStatus getCurrentFederateStatus() { return stateMachine ? stateMachine->getFederateStatus() : FEDERATE_NONE; }
     
     // Setters
     void setNewModelState(ModelState state) { newModelState = state; }

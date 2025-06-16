@@ -12,6 +12,11 @@ DeviceManager::DeviceManager() {
     modelManager = new ModelManager();
     networkManager = nullptr;
     
+    // Initialize new state machine architecture
+    stateMachine = new StateMachine();
+    taskCoordinator = nullptr;
+    
+    // Legacy state variables (for compatibility during transition)
     newModelState = ModelState_IDLE;
     federateState = FederateState_NONE;
     currentRound = -1;
@@ -25,6 +30,13 @@ DeviceManager::DeviceManager() {
 }
 
 DeviceManager::~DeviceManager() {
+    if (taskCoordinator) {
+        taskCoordinator->shutdown();
+        delete taskCoordinator;
+    }
+    if (stateMachine) {
+        delete stateMachine;
+    }
     if (deviceConfig) {
         delete deviceConfig;
     }
@@ -117,6 +129,31 @@ void DeviceManager::bootUp(bool initBaseModel) {
     fixedMemoryUsage.connectionMade = info.total_free_bytes;
     
     LOG_INFO("Device boot completed successfully");
+    
+    // Initialize state machine
+    if (!initializeStateMachine()) {
+        LOG_ERROR("Failed to initialize state machine");
+        return;
+    }
+    
+    // Transition from initializing to inference mode
+    if (!transitionToState(INFERENCE_MODE)) {
+        LOG_ERROR("Failed to transition to inference mode");
+        stateMachine->reportError();
+        return;
+    }
+    
+    // Start task coordinator
+    if (!startTaskCoordinator()) {
+        LOG_ERROR("Failed to start task coordinator");
+        stateMachine->reportError();
+        return;
+    }
+    
+    // Update device state based on loaded configuration
+    updateDeviceState();
+    
+    LOG_INFO("Device boot with state machine completed successfully");
 }
 
 ErrorResult DeviceManager::loadDeviceDefinitions() {
@@ -228,6 +265,11 @@ void DeviceManager::captureAfterFullSetupMemory() {
 }
 
 void DeviceManager::processModel() {
+    // Only process model if we're in federation training state
+    if (!stateMachine || !stateMachine->isFederationActive()) {
+        return;
+    }
+    
     // Main model processing logic
     switch (newModelState) {
         case ModelState_READY_TO_TRAIN:
@@ -275,6 +317,10 @@ void DeviceManager::processModel() {
                     roundMemoryUsage
                 );
                 newModelState = ModelState_WAITING_DOWNLOAD;
+                
+                // Update federation status to ending
+                updateFederationStatus(FEDERATE_ENDING);
+                
                 auto saveResult = saveDeviceConfig();
                 if (saveResult.isError()) {
                     LOG_ERROR_CODE(saveResult.code, "Failed to save device config: %s", saveResult.message);
@@ -438,18 +484,24 @@ void DeviceManager::onCommandReceived(Stream& stream) {
                 
                 // Verify the model was created successfully
                 if (modelManager->getNewModel()) {
-                    // Update state only if successful
-                    federateState = FederateState_TRAINING;
-                    currentRound = 0;
-                    newModelState = ModelState_READY_TO_TRAIN;
-                    
-                    auto saveResult = saveDeviceConfig();
-                    if (saveResult.isError()) {
-                        LOG_ERROR_CODE(saveResult.code, "Failed to save device config: %s", saveResult.message);
+                    // Use new state machine for federation start
+                    if (startFederationTraining()) {
+                        // Legacy state updates for compatibility
+                        currentRound = 0;
+                        newModelState = ModelState_READY_TO_TRAIN;
+                        
+                        auto saveResult = saveDeviceConfig();
+                        if (saveResult.isError()) {
+                            LOG_ERROR_CODE(saveResult.code, "Failed to save device config: %s", saveResult.message);
+                        }
+                        LOG_INFO("Federate training started successfully via state machine");
+                    } else {
+                        LOG_ERROR("Failed to start federate training via state machine");
+                        stateMachine->reportError();
                     }
-                    LOG_INFO("Federate training started successfully");
                 } else {
                     LOG_ERROR("Failed to create federated model");
+                    stateMachine->reportError();
                 }
             } else {
                 LOG_ERROR("No config object in federate_start command");
@@ -459,20 +511,21 @@ void DeviceManager::onCommandReceived(Stream& stream) {
         }
     }
     else if (strcmp(command, "federate_end") == 0) {
+        updateFederationStatus(FEDERATE_ENDING);
         federateState = FederateState_DONE;
         auto saveResult = saveDeviceConfig();
         if (saveResult.isError()) {
             LOG_ERROR_CODE(saveResult.code, "Failed to save device config: %s", saveResult.message);
         }
+        LOG_INFO("Federation training marked as ending");
     }
     else if (strcmp(command, "federate_unsubscribe") == 0) {
-        federateState = FederateState_NONE;
-        currentRound = -1;
-        newModelState = ModelState_IDLE;
+        resetFederationState();
         auto saveResult = saveDeviceConfig();
         if (saveResult.isError()) {
             LOG_ERROR_CODE(saveResult.code, "Failed to save device config: %s", saveResult.message);
         }
+        LOG_INFO("Device unsubscribed from federation");
     }
     else if (strcmp(command, "federate_alive") == 0) {
         // Respond to alive check from server
@@ -538,4 +591,219 @@ void DeviceManager::onRawResumeReceived(Stream& stream) {
     } else {
         LOG_ERROR("Failed to load raw resume model");
     }
+}
+
+bool DeviceManager::initializeStateMachine() {
+    if (!stateMachine) {
+        LOG_ERROR("StateMachine not initialized");
+        return false;
+    }
+    
+    // Initialize state machine with current device state
+    if (!stateMachine->transitionTo(DEVICE_INITIALIZING)) {
+        LOG_ERROR("Failed to initialize state machine");
+        return false;
+    }
+    
+    LOG_INFO("State machine initialized successfully");
+    return true;
+}
+
+bool DeviceManager::startTaskCoordinator() {
+    if (!stateMachine || !networkManager || !modelManager) {
+        LOG_ERROR("Prerequisites not met for TaskCoordinator initialization");
+        return false;
+    }
+    
+    // Create task coordinator with dependencies
+    taskCoordinator = new TaskCoordinator(stateMachine, modelManager, networkManager);
+    
+    // Initialize task coordinator
+    if (!taskCoordinator->initialize()) {
+        LOG_ERROR("Failed to initialize TaskCoordinator");
+        delete taskCoordinator;
+        taskCoordinator = nullptr;
+        return false;
+    }
+
+    D_println("1");
+    
+    // Start the FreeRTOS tasks
+    if (!taskCoordinator->startTasks()) {
+        LOG_ERROR("Failed to start TaskCoordinator tasks");
+        taskCoordinator->shutdown();
+        delete taskCoordinator;
+        taskCoordinator = nullptr;
+        return false;
+    }
+
+    D_println("2");
+    
+    LOG_INFO("TaskCoordinator started successfully");
+    return true;
+}
+
+void DeviceManager::updateDeviceState() {
+    if (!stateMachine) return;
+    
+    // Sync legacy state with new state machine based on federation status
+    if (federateState == FederateState_TRAINING || federateState == FederateState_STARTING) {
+        if (stateMachine->getCurrentState() != FEDERATION_TRAINING) {
+            transitionToState(FEDERATION_TRAINING);
+            updateFederationStatus(FEDERATE_TRAINING);
+        }
+    } else if (federateState == FederateState_SUBSCRIBED) {
+        if (stateMachine->getCurrentState() == FEDERATION_TRAINING) {
+            transitionToState(INFERENCE_MODE);
+        }
+        updateFederationStatus(FEDERATE_SUBSCRIBED);
+    } else if (federateState == FederateState_NONE) {
+        if (stateMachine->getCurrentState() == FEDERATION_TRAINING) {
+            transitionToState(INFERENCE_MODE);
+        }
+        updateFederationStatus(FEDERATE_NONE);
+    }
+    
+    // Update task coordinator based on new state
+    if (taskCoordinator) {
+        taskCoordinator->updateTaskStates();
+    }
+}
+
+bool DeviceManager::transitionToState(DeviceState newState) {
+    if (!stateMachine) {
+        LOG_ERROR("StateMachine not initialized");
+        return false;
+    }
+    
+    DeviceState currentState = stateMachine->getCurrentState();
+    if (stateMachine->transitionTo(newState)) {
+        LOG_INFO("Device state transition: %s -> %s", 
+                stateMachine->getStateString(), 
+                stateMachine->getStateString());
+        
+        // Update task coordinator
+        if (taskCoordinator) {
+            taskCoordinator->updateTaskStates();
+        }
+        
+        return true;
+    } else {
+        LOG_ERROR("Invalid state transition attempted: %s -> %s", 
+                 stateMachine->getStateString(),
+                 stateMachine->getStateString());
+        return false;
+    }
+}
+
+bool DeviceManager::updateFederationStatus(FederateStatus newStatus) {
+    if (!stateMachine) {
+        LOG_ERROR("StateMachine not initialized");
+        return false;
+    }
+    
+    if (stateMachine->setFederateStatus(newStatus)) {
+        LOG_INFO("Federation status updated: %s", stateMachine->getStatusString());
+        return true;
+    } else {
+        LOG_ERROR("Invalid federation status transition attempted");
+        return false;
+    }
+}
+
+bool DeviceManager::startFederationTraining() {
+    if (!stateMachine->canStartFederation()) {
+        LOG_ERROR("Cannot start federation - invalid state");
+        return false;
+    }
+    
+    // Transition to federation training mode
+    if (!transitionToState(FEDERATION_TRAINING)) {
+        LOG_ERROR("Failed to transition to federation training state");
+        return false;
+    }
+    
+    // Update federation status
+    if (!updateFederationStatus(FEDERATE_TRAINING)) {
+        LOG_ERROR("Failed to update federation status");
+        return false;
+    }
+    
+    // Update legacy state for compatibility
+    federateState = FederateState_TRAINING;
+    
+    LOG_INFO("Federation training started successfully");
+    return true;
+}
+
+bool DeviceManager::stopFederationTraining() {
+    if (!stateMachine->canStopFederation()) {
+        LOG_ERROR("Cannot stop federation - invalid state");
+        return false;
+    }
+    
+    // Transition back to inference mode
+    if (!transitionToState(INFERENCE_MODE)) {
+        LOG_ERROR("Failed to transition to inference mode");
+        return false;
+    }
+    
+    // Update federation status
+    if (!updateFederationStatus(FEDERATE_NONE)) {
+        LOG_ERROR("Failed to update federation status");
+        return false;
+    }
+    
+    // Update legacy state for compatibility
+    federateState = FederateState_NONE;
+    
+    LOG_INFO("Federation training stopped successfully");
+    return true;
+}
+
+bool DeviceManager::handleFederationCommand(const char* command, JsonDocument& doc) {
+    if (!stateMachine) {
+        LOG_ERROR("StateMachine not initialized");
+        return false;
+    }
+    
+    if (strcmp(command, "federate_subscribe") == 0) {
+        if (stateMachine->getCurrentState() == INFERENCE_MODE) {
+            updateFederationStatus(FEDERATE_SUBSCRIBED);
+            federateState = FederateState_SUBSCRIBED;
+            LOG_INFO("Device subscribed to federation");
+            return true;
+        } else {
+            LOG_ERROR("Cannot subscribe to federation from current state");
+            return false;
+        }
+    }
+    else if (strcmp(command, "federate_start") == 0) {
+        return startFederationTraining();
+    }
+    else if (strcmp(command, "federate_end") == 0) {
+        updateFederationStatus(FEDERATE_ENDING);
+        federateState = FederateState_DONE;
+        LOG_INFO("Federation training ending");
+        return true;
+    }
+    else if (strcmp(command, "federate_unsubscribe") == 0) {
+        return stopFederationTraining();
+    }
+    
+    return false;
+}
+
+void DeviceManager::resetFederationState() {
+    updateFederationStatus(FEDERATE_NONE);
+    federateState = FederateState_NONE;
+    currentRound = -1;
+    newModelState = ModelState_IDLE;
+    
+    if (stateMachine->getCurrentState() == FEDERATION_TRAINING || 
+        stateMachine->getCurrentState() == FEDERATION_RECOVERY) {
+        transitionToState(INFERENCE_MODE);
+    }
+    
+    LOG_INFO("Federation state reset");
 }
