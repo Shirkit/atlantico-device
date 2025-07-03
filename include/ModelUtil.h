@@ -72,9 +72,16 @@ struct model {
     IDFLOAT *weights;
     unsigned long parsingTime = 0;
     int round;
+    
+    model() : biases(nullptr), weights(nullptr), round(-1) {}
+    
     ~model() {
-        delete[] biases;
-        delete[] weights;
+        if (biases != nullptr) {
+            delete[] biases;
+        }
+        if (weights != nullptr) {
+            delete[] weights;
+        }
     }
 };
 
@@ -295,9 +302,10 @@ struct ModelConfig {
     DFLOAT learningRateOfWeights = 0.3333;
     DFLOAT learningRateOfBiases = 0.0666;
     unsigned long randomSeed = 10;
+    bool jsonWeights = false;
 
-    ModelConfig(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, unsigned int epochs = 1, unsigned long randomSeed = 10, DFLOAT learningRateOfWeights = 0.3333f, DFLOAT learningRateOfBiases = 0.0666f)
-        : layers(layers), numberOfLayers(numberOfLayers), actvFunctions(actvFunctions), epochs(epochs), randomSeed(randomSeed), learningRateOfWeights(learningRateOfWeights), learningRateOfBiases(learningRateOfBiases) {}
+    ModelConfig(unsigned int* layers, unsigned int numberOfLayers, byte* actvFunctions, unsigned int epochs = 1, unsigned long randomSeed = 10, DFLOAT learningRateOfWeights = 0.3333f, DFLOAT learningRateOfBiases = 0.0666f, bool jsonWeights = false)
+        : layers(layers), numberOfLayers(numberOfLayers), actvFunctions(actvFunctions), epochs(epochs), randomSeed(randomSeed), learningRateOfWeights(learningRateOfWeights), learningRateOfBiases(learningRateOfBiases), jsonWeights(jsonWeights) {}
 };
 
 struct DeviceConfig {

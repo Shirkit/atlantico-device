@@ -152,9 +152,9 @@ void setup()
   unsigned int* layers = new unsigned int[5] { 3, 40, 20, 10, 6 };
   byte* Actv_Functions = new byte[4] { 1,  1,  1,  6 };
   
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+  // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
 
-  localModelConfig = new ModelConfig(layers, 5, Actv_Functions, 1, 10, 0.3333f / 12.0f, 0.06666f / 12.0f);
+  localModelConfig = new ModelConfig(layers, 5, Actv_Functions, 1, 10, 0.3333f / 12.0f, 0.06666f / 12.0f, false);
   
   randomSeed(localModelConfig->randomSeed);
   bootUp(false);
@@ -192,4 +192,12 @@ void loop()
   processModel();
 
   parseSerial();
+
+  if (millis() - timeSinceLastServerMessage > 66000) {
+    if (newModelState != ModelState_MODEL_BUSY && federateState != FederateState_NONE) {
+      D_println("No message received from server in the last 60 seconds, rebooting device...");
+      delay(10);
+      ESP.restart();
+    }
+  }
 }

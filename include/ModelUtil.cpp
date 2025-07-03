@@ -13,7 +13,7 @@ PicoMQTT::Client mqtt(MQTT_BROKER, 1883, "esp", nullptr, nullptr, 5000UL, 30000U
 
 model* tempModel;
 unsigned long datasetSize = 0;
-unsigned long previousTransmit = 0, previousConstruct = 0;
+unsigned long previousTransmit = 0, previousConstruct = 0, timeSinceLastServerMessage = 0;;
 int currentRound = -1;
 bool waitingForMe = false;
 bool unsubscribeFromResume = false;
@@ -44,9 +44,9 @@ void printTiming(bool doReset = false) {
 
 void printMemory() {
     heap_caps_get_info(&info, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); // internal RAM, memory capable to store data or to create new task
-    D_printf("Heap info: %d bytes free\n", info.total_free_bytes);
-    D_printf("Heap info: %d bytes largest free block\n", info.largest_free_block);
-    D_printf("Heap info: %d bytes minimum free ever\n", info.minimum_free_bytes);
+    // D_printf("Heap info: %d bytes free\n", info.total_free_bytes);
+    // D_printf("Heap info: %d bytes largest free block\n", info.largest_free_block);
+    // D_printf("Heap info: %d bytes minimum free ever\n", info.minimum_free_bytes);
 }
 
 #endif
@@ -147,6 +147,8 @@ void bootUp(bool initBaseModel) {
 
     printMemory();
     fixedMemoryUsage.connectionMade = info.total_free_bytes;
+
+    timeSinceLastServerMessage = millis();
 
     D_println("Done booting.");
 }
@@ -400,8 +402,8 @@ void setupFederatedModel() {
 }
 
 void processMessages() {
+    ensureConnected();
     if (!sendingMessage) {
-        ensureConnected();
         if (unsubscribeFromResume) {
             mqtt.unsubscribe(MQTT_RESUME_TOPIC);
             String topic = String(MQTT_RAW_RESUME_TOPIC);
@@ -417,6 +419,7 @@ void processMessages() {
 
 void setupResume() {    
     mqtt.subscribe(MQTT_RESUME_TOPIC, [](const char* topic, Stream& stream) {
+        timeSinceLastServerMessage = millis();
         if (newModelState != ModelState_IDLE) {
             D_println("Already processing a model");
             return;
@@ -461,6 +464,7 @@ void setupResume() {
     topic.concat(CLIENT_NAME);
 
     mqtt.subscribe(topic, [](const char* topic, Stream& stream) {
+        timeSinceLastServerMessage = millis();
         if (newModelState != ModelState_IDLE) {
             D_println("Already processing a model");
             return;
@@ -513,7 +517,7 @@ void setupResume() {
 void setupMQTT(bool resume) {
     D_println("Setting up MQTT...");
 
-    // WiFi.setTxPower(WIFI_POWER_MINUS_1dBm);
+    WiFi.setTxPower(WIFI_POWER_MINUS_1dBm);
 
     D_println("power set");
     
@@ -523,6 +527,7 @@ void setupMQTT(bool resume) {
     // TODO Need to handle disconnections properly, when the FL server drops/leaves, when mosquitto dies, when wifi dies
 
     mqtt.subscribe(MQTT_RECEIVE_COMMANDS_TOPIC, [](const char* topic, Stream& stream) {
+        timeSinceLastServerMessage = millis();
 
         JsonDocument doc;
 
@@ -633,11 +638,16 @@ void setupMQTT(bool resume) {
                 }
             } else if (strcmp(command, "federate_alive") == 0) {
                 sendMessageToNetwork(FederateCommand_ALIVE);
+            } else if (strcmp(command, "federate_reboot") == 0) {
+                if (federateState != FederateState_NONE) {
+                    ESP.restart();
+                }
             }
         }
     });
 
     mqtt.subscribe(MQTT_RAW_RECEIVE_TOPIC, [](const char* topic, Stream& stream) {
+        timeSinceLastServerMessage = millis();
         unsigned long startTime = millis();
         printMemory();
         roundMemoryUsage.messageReceived = info.total_free_bytes;
@@ -696,6 +706,7 @@ void setupMQTT(bool resume) {
     });
 
     mqtt.subscribe(MQTT_RECEIVE_TOPIC, [](const char* topic, Stream& stream) {
+        timeSinceLastServerMessage = millis();
         printMemory();
         roundMemoryUsage.messageReceived = info.total_free_bytes;
         if (newModelState != ModelState_IDLE) {
@@ -751,6 +762,7 @@ void setupMQTT(bool resume) {
 }
 
 bool connectToWifi(bool forever) {
+    // ! If we disable the watchdog trigger this may cause the ESP32 to hang indefinitely, but even without disabling some devices got stuck inside here. There are alternatives to detect this, we could spawn a new Task that monitors the ESP32 health and try to recover from those cases.
     WiFi.config(IPAddress(192, 168, 15, 40 + String(CLIENT_NAME).substring(3).toInt()), IPAddress(192, 168, 15, 1), IPAddress(255, 255, 255, 0));
     D_println("wifi ip set");
     if (WiFi.status() == WL_CONNECTED) {
@@ -938,8 +950,6 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
 #endif
 
     // TODO Migrate this code into a function that persists after the function exits
-    // doc["biases"] = JsonArray();
-    // doc["weights"] = JsonArray();
     doc["client"] = CLIENT_NAME;
     doc["metrics"] = JsonObject();
     doc["metrics"]["accuracy"] = metrics.accuracy();
@@ -986,19 +996,23 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
     doc["memory"]["round"]["beforeTrain"] = roundMemoryUsage.beforeTrain;
     doc["memory"]["round"]["afterTrain"] = roundMemoryUsage.afterTrain;
 
-    for (unsigned int n = 0; n < NN.numberOflayers; n++) {
-        for (unsigned int i = 0; i < NN.layers[n]._numberOfOutputs; i++) {
+    if ((federateModelConfig != NULL && federateModelConfig->jsonWeights && federateState != FederateState_NONE) || (federateState == FederateState_NONE && localModelConfig->jsonWeights)) {
+        doc["biases"] = JsonArray();
+        doc["weights"] = JsonArray();
+        for (unsigned int n = 0; n < NN.numberOflayers; n++) {
+            for (unsigned int i = 0; i < NN.layers[n]._numberOfOutputs; i++) {
 #if defined(USE_64_BIT_DOUBLE)
-            doc["biases"].add(String(NN.layers[n].bias[i], 16));
+                doc["biases"].add(String(NN.layers[n].bias[i], 16));
 #else
-            doc["biases"].add(NN.layers[n].bias[i]);
+                doc["biases"].add(NN.layers[n].bias[i]);
 #endif
-            for (unsigned int j = 0; j < NN.layers[n]._numberOfInputs; j++) {
+                for (unsigned int j = 0; j < NN.layers[n]._numberOfInputs; j++) {
 #if defined(USE_64_BIT_DOUBLE)
-                doc["weights"].add(String(NN.layers[n].weights[i][j], 16));
+                    doc["weights"].add(String(NN.layers[n].weights[i][j], 16));
 #else
-                doc["weights"].add(NN.layers[n].weights[i][j]);
+                    doc["weights"].add(NN.layers[n].weights[i][j]);
 #endif
+                }
             }
         }
     }
@@ -1171,7 +1185,11 @@ void processModel() {
         }
         newModelState = ModelState_MODEL_BUSY;
         // ! It was throwing kernel panic due to high cpu usage without releasing the core before increasing the WatchDog timer
-        newModelMetrics = trainModelFromOriginalDataset(*newModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
+        if (federateState == FederateState_TRAINING && federateModelConfig != NULL && federateModelConfig->layers != NULL && federateModelConfig->numberOfLayers > 0) {
+            newModelMetrics = trainModelFromOriginalDataset(*newModel, *federateModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
+        } else {
+            newModelMetrics = trainModelFromOriginalDataset(*newModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
+        }
         if (tempModel != NULL) {
             newModelMetrics->parsingTime = tempModel->parsingTime;
         }
