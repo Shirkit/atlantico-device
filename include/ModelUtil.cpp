@@ -49,6 +49,32 @@ void printMemory() {
     // D_printf("Heap info: %d bytes minimum free ever\n", info.minimum_free_bytes);
 }
 
+void printModelConfig(ModelConfig *modelConfig) {
+    D_println("Federate model config loaded:");
+                D_println("Layers: ");
+                for (int i = 0; i < modelConfig->numberOfLayers; i++) {
+                    D_print(modelConfig->layers[i]);
+                    if (i < modelConfig->numberOfLayers - 1) {
+                        D_print(", ");
+                    }
+                }
+                D_println();
+                D_println("Activation Functions: ");
+                for (int i = 0; i < modelConfig->numberOfLayers; i++) {
+                    D_print(modelConfig->actvFunctions[i]);
+                    if (i < modelConfig->numberOfLayers - 1) {
+                        D_print(", ");
+                    }
+                }
+                D_println();
+                D_println("Learning Rate of Weights: " + String(modelConfig->learningRateOfWeights));
+                D_println("Learning Rate of Biases: " + String(modelConfig->learningRateOfBiases));
+                if (modelConfig->randomSeed != 0) {
+                    randomSeed(modelConfig->randomSeed);
+                    D_println("Random Seed: " + String(modelConfig->randomSeed));
+                }
+}
+
 #endif
 
 bool ensureConnected() {

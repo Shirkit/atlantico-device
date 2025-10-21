@@ -1,4 +1,3 @@
-
 #ifndef MODELUTIL_H_
 #define MODELUTIL_H_
 
@@ -29,32 +28,7 @@
 #define D_printf(...)
 #endif
 
-// -------------- Constants
-
-#define MODEL_PATH "/model.nn"
-#define NEW_MODEL_PATH "/new_model.nn"
-#define TEMPORARY_NEW_MODEL_PATH "/new_model_temp.nn"
-#define CONFIGURATION_PATH "/config.json"
-#define DEVICE_DEFINITION_PATH "/device.json"
-#define X_TRAIN_PATH "/x_train.csv"
-#define Y_TRAIN_PATH "/y_train.csv"
-#define X_TEST_PATH "/x_test.csv"
-#define Y_TEST_PATH "/y_test.csv"
-#define GATHERED_DATA_PATH "/data.db"
-// #define CLIENT_NAME "esp01"
-#define MQTT_PUBLISH_TOPIC "esp32/fl/model/push"
-#define MQTT_RAW_PUBLISH_TOPIC "esp32/fl/model/rawpush"
-#define MQTT_RECEIVE_TOPIC "esp32/fl/model/pull"
-#define MQTT_RAW_RECEIVE_TOPIC "esp32/fl/model/rawpull"
-#define MQTT_RESUME_TOPIC "esp32/fl/model/resume"
-#define MQTT_RAW_RESUME_TOPIC "esp32/fl/model/rawresume"
-#define MQTT_RECEIVE_COMMANDS_TOPIC "esp32/fl/commands/pull"
-#define MQTT_SEND_COMMANDS_TOPIC "esp32/fl/commands/push"
-#define WIFI_SSID "PedroRapha"
-#define WIFI_PASSWORD "456123789a"
-#define MQTT_BROKER "192.168.15.9"
-// #define MQTT_MESSAGE_SIZE 500
-#define CONNECTION_TIMEOUT 30000 // in miliseconds
+#include "Config.h"
 
 /**
  * Defining the JSON structure for networking messaging
