@@ -330,6 +330,8 @@ NeuralNetwork* loadModelFromFlash(const String& file);
 model* transformDataToModel(Stream& stream);
 
 multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, ModelConfig& config, const String& x_file, const String& y_file);
+// Train directly from binary dataset using metadata.json schema (no CSV, streaming)
+multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, ModelConfig& config, const String& bin_file, const String& meta_file);
 
 void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics);
 
@@ -340,6 +342,9 @@ void processMessages();
 DFLOAT* predictFromCurrentModel(DFLOAT* x);
 
 testData* readTestData(ModelConfig modelConfig);
+
+// Convert binary dataset into X and Y CSV files on LittleFS using metadata.json schema
+bool convertBinaryToXY(const char* binPath, const char* metaPath, const char* xOutPath, const char* yOutPath);
 
 void setupMQTT(bool resume = false);
 

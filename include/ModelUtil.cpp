@@ -5,6 +5,8 @@
 #include <ArduinoJson.h>
 #include <PicoMQTT.h>
 #include <WiFi.h>
+#include <vector>
+#include <cmath>
 
 // -------------- Variables
 
@@ -149,7 +151,11 @@ void bootUp(bool initBaseModel) {
                 delete currentModelMetrics;
             }
             printMemory();
+            #ifdef DATASET_BINARY
+            currentModelMetrics = trainModelFromBinaryDataset(*currentModel, *localModelConfig, XY_TRAIN_PATH, METADATA_JSON_PATH);
+            #else
             currentModelMetrics = trainModelFromOriginalDataset(*currentModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
+            #endif
             if (saveModelToFlash(*currentModel, MODEL_PATH)) {
                 saveDeviceConfig();
             }
@@ -286,6 +292,260 @@ model* transformDataToModel(Stream& stream) {
     return m;
 }
 
+#ifdef DATASET_BINARY
+multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, ModelConfig& config, const String& bin_file, const String& meta_file) {
+    D_println("Training model from binary dataset...");
+    printTiming(true);
+
+    unsigned long initTime = millis();
+    datasetSize = 0;
+
+    // Load metadata
+    if (!LittleFS.exists(meta_file)) {
+        D_println("Metadata file not found");
+        return NULL;
+    }
+    File metaF = LittleFS.open(meta_file, "r");
+    if (!metaF) {
+        D_println("Failed to open metadata file");
+        return NULL;
+    }
+    JsonDocument doc;
+    DeserializationError derr = deserializeJson(doc, metaF);
+    metaF.close();
+    if (derr) {
+        D_println("Failed to parse metadata JSON");
+        return NULL;
+    }
+
+    JsonArray schema = doc["schema"];
+    const char* label_col = doc["label_column"] | "activityID";
+    JsonArray label_vals = doc["label_values"];
+    std::vector<long> label_values;
+    for (auto v : label_vals) label_values.push_back(v.as<long>());
+    bool encoded_labels = doc.containsKey("label_map");
+
+    struct Col { String name; String type; int bytes; int offset; };
+    std::vector<Col> cols;
+    int row_size = 0;
+    for (JsonObject c : schema) {
+        Col col;
+        col.name = String((const char*)c["name"]);
+        col.type = String((const char*)c["type"]);
+        col.bytes = c["bytes"] | 0;
+        col.offset = c["offset"] | 0;
+        cols.push_back(col);
+        row_size += col.bytes;
+    }
+
+    // Debug: print parsed schema and computed row size
+    D_println("[DBG] Parsed schema columns: " + String(cols.size()));
+    D_println("[DBG] Computed row_size: " + String(row_size));
+
+    // Determine input and label indices
+    std::vector<int> input_indices;
+    int label_index = -1;
+    for (size_t i = 0; i < cols.size(); ++i) {
+        if (cols[i].name == String(label_col)) {
+            label_index = (int)i;
+        } else if (cols[i].name == String("timestamp")) {
+            // skip timestamp by default
+            continue;
+        } else {
+            input_indices.push_back((int)i);
+        }
+    }
+    if (label_index < 0) {
+        D_println("Label column not found in schema");
+        return NULL;
+    }
+
+    // Debug: report input / label mapping
+    D_println("[DBG] Input feature count: " + String(input_indices.size()));
+    D_println("[DBG] Label column index: " + String(label_index) + " (name='" + String(label_col) + "')");
+
+    File binF = LittleFS.open(bin_file, "r");
+    if (!binF) {
+        D_println("Failed to open binary file");
+        return NULL;
+    }
+
+    // Allocate buffers and arrays
+    uint8_t* rowbuf = (uint8_t*)malloc(row_size);
+    if (!rowbuf) {
+        D_println("Failed to allocate row buffer");
+        binF.close();
+        return NULL;
+    }
+
+    IDFLOAT* x = new IDFLOAT[NN.layers[0]._numberOfInputs];
+    IDFLOAT* y = new IDFLOAT[NN.layers[NN.numberOflayers - 1]._numberOfOutputs];
+
+    // Debug: report NN expected sizes vs parsed sizes
+    D_println("[DBG] NN expected input size: " + String(NN.layers[0]._numberOfInputs) + ", parsed feature count: " + String(input_indices.size()));
+    D_println("[DBG] NN output size (num classes): " + String(NN.layers[NN.numberOflayers - 1]._numberOfOutputs));
+
+    multiClassClassifierMetrics* metrics = new multiClassClassifierMetrics;
+    metrics->numberOfClasses = NN.layers[NN.numberOflayers - 1]._numberOfOutputs;
+    metrics->metrics = new classClassifierMetricts[metrics->numberOfClasses];
+
+    // Limit verbose prints: show detailed parse for first N rows, then periodic summaries
+    const int DBG_FIRST_ROWS = 5;
+    const int DBG_EVERY_N = 5000;
+    for (int epoch = 0; epoch < config.epochs; ++epoch) {
+        D_println("Epoch: " + String(epoch+1));
+        binF.seek(0);
+
+        while (binF.available() >= row_size) {
+            size_t n = binF.read(rowbuf, row_size);
+            if (n != (size_t)row_size) break;
+            datasetSize++;
+
+            // parse inputs
+            for (size_t i = 0; i < input_indices.size(); ++i) {
+                int ci = input_indices[i];
+                Col &c = cols[ci];
+                float val = 0.0f;
+                if (c.type == "float32") {
+                    float v; memcpy(&v, rowbuf + c.offset, 4); val = v;
+                } else if (c.type == "int32") {
+                    int32_t v; memcpy(&v, rowbuf + c.offset, 4); val = (float)v; // timestamp skipped earlier
+                } else if (c.type == "uint8") {
+                    uint8_t v = *(uint8_t*)(rowbuf + c.offset); val = (float)v;
+                } else if (c.type == "int8") {
+                    int8_t v = *(int8_t*)(rowbuf + c.offset); val = (float)v;
+                }
+                #if defined(USE_64_BIT_DOUBLE)
+                x[i] = (IDFLOAT)val;
+                #else
+                x[i] = (IDFLOAT)val;
+                #endif
+            }
+
+            // Debug: print sample parsed X for first rows and periodic samples
+            if ((int)datasetSize <= DBG_FIRST_ROWS || (datasetSize % DBG_EVERY_N) == 0) {
+                D_println("[DBG] Row #" + String(datasetSize) + " parsed -- first few features:");
+                String s = "";
+                for (size_t xi = 0; xi < input_indices.size(); ++xi) {
+                    s += String((double)x[xi], 6);
+                    if (xi < input_indices.size() - 1) s += ", ";
+                    if (xi > 30) { s += ", ..."; break; }
+                }
+                D_println(s);
+            }
+
+            // parse label and build one-hot y
+            long labelVal = 0;
+            Col &lc = cols[label_index];
+            if (lc.type == "int8") { int8_t v; memcpy(&v, rowbuf + lc.offset, 1); labelVal = v; }
+            else if (lc.type == "uint8") { uint8_t v; memcpy(&v, rowbuf + lc.offset, 1); labelVal = v; }
+            else if (lc.type == "int32") { int32_t v; memcpy(&v, rowbuf + lc.offset, 4); labelVal = v; }
+            else { int32_t v; memcpy(&v, rowbuf + lc.offset, 4); labelVal = v; }
+
+            if (encoded_labels) {
+                // labelVal is encoded as 1..N where 0 means "no label".
+                int encoded = (int)labelVal - 1; // convert to 0-based index
+                if (encoded < 0 || encoded >= (int)metrics->numberOfClasses) {
+                    // no label or out-of-range -> all zeros
+                    for (unsigned int k = 0; k < metrics->numberOfClasses; ++k) y[k] = (IDFLOAT)0.0;
+                } else {
+                    for (unsigned int k = 0; k < metrics->numberOfClasses; ++k) {
+                        y[k] = (k == encoded) ? (IDFLOAT)1.0 : (IDFLOAT)0.0;
+                    }
+                }
+            } else {
+                for (unsigned int k = 0; k < metrics->numberOfClasses; ++k) {
+                    y[k] = (label_values[k] == labelVal) ? (IDFLOAT)1.0 : (IDFLOAT)0.0;
+                }
+            }
+
+            // Debug: print y (one-hot) for the same sample rows
+            if ((int)datasetSize <= DBG_FIRST_ROWS || (datasetSize % DBG_EVERY_N) == 0) {
+                String ys = "[DBG] y: ";
+                for (unsigned int k = 0; k < metrics->numberOfClasses; ++k) {
+                    ys += String((int)y[k]);
+                    if (k < metrics->numberOfClasses - 1) ys += ",";
+                }
+                D_println(ys);
+            }
+
+            // Train model
+            IDFLOAT* predictions = NN.FeedForward(x);
+            NN.BackProp(y);
+            metrics->meanSqrdError = NN.getMeanSqrdError(1);
+
+            // Detect gradient explosion / NaN or Inf in error and dump context
+            {
+                double mse = (double)metrics->meanSqrdError;
+                if (!isfinite(mse) || isnan(mse)) {
+                    D_println("[ERR] Gradient explosion detected (meanSqrdError is NaN/Inf)");
+                    D_println("[ERR] Epoch: " + String(epoch+1) + "  Row#: " + String(datasetSize));
+
+                    // Print a short slice of x
+                    String sx = "[ERR] x: ";
+                    int max_x_print = 12;
+                    for (size_t xi = 0; xi < input_indices.size() && (int)xi < max_x_print; ++xi) {
+                        sx += String((double)x[xi], 6);
+                        if (xi < input_indices.size() - 1) sx += ", ";
+                    }
+                    if (input_indices.size() > (size_t)max_x_print) sx += ", ...";
+                    D_println(sx);
+
+                    // Print y one-hot
+                    String sy = "[ERR] y: ";
+                    for (unsigned int k = 0; k < metrics->numberOfClasses; ++k) {
+                        sy += String((int)y[k]);
+                        if (k < metrics->numberOfClasses - 1) sy += ",";
+                    }
+                    D_println(sy);
+
+                    // Print predictions
+                    String sp = "[ERR] predictions: ";
+                    for (unsigned int k = 0; k < metrics->numberOfClasses; ++k) {
+                        sp += String((double)predictions[k], 6);
+                        if (k < metrics->numberOfClasses - 1) sp += ",";
+                    }
+                    D_println(sp);
+
+                    // Cleanup and return early to avoid further corruption
+                    metrics->trainingTime = millis() - initTime;
+                    metrics->epochs = config.epochs;
+                    delete[] x;
+                    delete[] y;
+                    free(rowbuf);
+                    binF.close();
+                    D_println("[ERR] Aborting training due to gradient explosion.");
+                    return metrics;
+                }
+            }
+
+            // Update metrics
+            for (int i = 0; i < metrics->numberOfClasses; i++) {
+                if (y[i] == 1) {
+                    if (predictions[i] >= 0.5) metrics->metrics[i].truePositives++;
+                    else metrics->metrics[i].falseNegatives++;
+                } else {
+                    if (predictions[i] >= 0.5) metrics->metrics[i].falsePositives++;
+                    else metrics->metrics[i].trueNegatives++;
+                }
+            }
+        }
+    }
+
+    metrics->trainingTime = millis() - initTime;
+    metrics->epochs = config.epochs;
+
+    delete[] x;
+    delete[] y;
+    free(rowbuf);
+    binF.close();
+    printTiming();
+    D_println("Binary training complete.");
+    return metrics;
+}
+#endif
+
+#ifdef DATASET_ORIGINAL
 multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, ModelConfig& config, const String& x_file, const String& y_file) {
     D_println("Training model from original dataset...");
     printTiming(true);
@@ -415,6 +675,7 @@ multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, Mo
     D_println("Training complete.");
     return metrics;
 }
+#endif
 
 void setupFederatedModel() {
     if (newModel != NULL) {
@@ -548,7 +809,11 @@ void setupMQTT(bool resume) {
     D_println("power set");
     
     connectToWifi(true);
-    connectToServerMQTT();
+    if (connectToServerMQTT()) {
+        D_println("Connected to MQTT server");
+    } else {
+        D_println("Failed to connect to MQTT server");
+    }
 
     // TODO Need to handle disconnections properly, when the FL server drops/leaves, when mosquitto dies, when wifi dies
 
@@ -1091,7 +1356,7 @@ DFLOAT* predictFromCurrentModel(DFLOAT* x) {
     return currentModel->FeedForward(x);
 }
 
-testData* readTestData(ModelConfig* modelConfig) {
+/*testData* readTestData(ModelConfig* modelConfig) {
     if (xTest.name() == nullptr) {
         xTest = LittleFS.open(X_TEST_PATH, "r");
     }
@@ -1186,7 +1451,7 @@ testData* readTestData(ModelConfig* modelConfig) {
     td->y = y;
     return td;
 
-}
+}*/
 
 bool compareMetrics(multiClassClassifierMetrics* oldMetrics, multiClassClassifierMetrics* newMetrics) {
     if (oldMetrics == NULL || newMetrics == NULL) {
@@ -1212,9 +1477,17 @@ void processModel() {
         newModelState = ModelState_MODEL_BUSY;
         // ! It was throwing kernel panic due to high cpu usage without releasing the core before increasing the WatchDog timer
         if (federateState == FederateState_TRAINING && federateModelConfig != NULL && federateModelConfig->layers != NULL && federateModelConfig->numberOfLayers > 0) {
+            #ifdef DATASET_BINARY
+            newModelMetrics = trainModelFromBinaryDataset(*newModel, *federateModelConfig, XY_TRAIN_PATH, METADATA_JSON_PATH);
+            #else
             newModelMetrics = trainModelFromOriginalDataset(*newModel, *federateModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
+            #endif
         } else {
+            #ifdef DATASET_BINARY
+            newModelMetrics = trainModelFromBinaryDataset(*newModel, *localModelConfig, XY_TRAIN_PATH, METADATA_JSON_PATH);
+            #else
             newModelMetrics = trainModelFromOriginalDataset(*newModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
+            #endif
         }
         if (tempModel != NULL) {
             newModelMetrics->parsingTime = tempModel->parsingTime;

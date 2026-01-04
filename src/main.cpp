@@ -55,7 +55,11 @@ void parseSerial() {
       if (currentModelMetrics != NULL) {
         delete currentModelMetrics;
       }
+      #ifdef DATASET_ORIGINAL
       currentModelMetrics = trainModelFromOriginalDataset(*currentModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
+      #else
+      currentModelMetrics = trainModelFromBinaryDataset(*currentModel, *localModelConfig, XY_TRAIN_PATH, METADATA_JSON_PATH);
+      #endif
       break;
     case 3:
       saveModelToFlash(*currentModel, MODEL_PATH);
@@ -70,7 +74,7 @@ void parseSerial() {
       currentModelMetrics->print();
       break;
     case 7: {
-      testData* test = readTestData(localModelConfig);
+      /*testData* test = readTestData(localModelConfig);
       if (test != NULL) {
         IDFLOAT* prediction = predictFromCurrentModel(test->x);
         Serial.print("Prediction: ");
@@ -84,7 +88,7 @@ void parseSerial() {
           }
         }
         Serial.println();
-      }
+      }*/
       break;
     }
     case 8:
@@ -105,7 +109,11 @@ void parseSerial() {
       if (newModelMetrics != NULL) {
         delete newModelMetrics;
       }
+      #ifdef DATASET_ORIGINAL
       newModelMetrics = trainModelFromOriginalDataset(*newModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
+      #else
+      newModelMetrics = trainModelFromBinaryDataset(*newModel, *localModelConfig, XY_TRAIN_PATH, METADATA_JSON_PATH);
+      #endif
       break;
     case 13:
       saveModelToFlash(*newModel, NEW_MODEL_PATH);
@@ -149,12 +157,12 @@ void setup()
   Serial.begin(115200);
   printMemory();
   fixedMemoryUsage.onBoot = info.total_free_bytes;
-  unsigned int* layers = new unsigned int[5] { 3, 40, 20, 10, 6 };
+  unsigned int* layers = new unsigned int[5] { 32, 144, 72, 36, 18 };
   byte* Actv_Functions = new byte[4] { 1,  1,  1,  6 };
   
   // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
 
-  localModelConfig = new ModelConfig(layers, 5, Actv_Functions, 1, 10, 0.3333f / 12.0f, 0.06666f / 12.0f, false);
+  localModelConfig = new ModelConfig(layers, 5, Actv_Functions, 1, 10, 0.3333f / 24.0f, 0.06666f / 24.0f, false);
   
   randomSeed(localModelConfig->randomSeed);
   bootUp(false);
