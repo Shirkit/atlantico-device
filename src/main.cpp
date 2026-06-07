@@ -62,10 +62,26 @@ void parseSerial() {
       #endif
       break;
     case 3:
-      saveModelToFlash(*currentModel, MODEL_PATH);
+      {
+      String modelPath = MODEL_PATH;
+      #ifdef DOUBLE_DATASET
+      if (datasetIndex == 1) {
+        modelPath = MODEL_PATH_2;
+      }
+      #endif
+      saveModelToFlash(*currentModel, modelPath);
+      }
       break;
     case 4:
-      currentModel = loadModelFromFlash(MODEL_PATH);
+      {
+      String modelPath = MODEL_PATH;
+      #ifdef DOUBLE_DATASET
+      if (datasetIndex == 1) {
+        modelPath = MODEL_PATH_2;
+      }
+      #endif
+      currentModel = loadModelFromFlash(modelPath);
+      }
       break;
     case 5:
       sendModelToNetwork(*currentModel, *currentModelMetrics);

@@ -5,10 +5,16 @@
 #include <ArduinoJson.h>
 #include <PicoMQTT.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <vector>
 #include <cmath>
 
 // -------------- Variables
+
+char* OTHER_CLIENT_NAME = NULL;
+DeviceConfig* otherDeviceConfig = NULL;
+
+bool loadOtherDeviceConfig();
 
 PicoMQTT::Client mqtt(MQTT_BROKER, 1883, "esp", nullptr, nullptr, 5000UL, 30000UL, 10000UL);
 // PicoMQTT::Client mqtt(MQTT_BROKER, 1883);
@@ -17,9 +23,200 @@ model* tempModel;
 unsigned long datasetSize = 0;
 unsigned long previousTransmit = 0, previousConstruct = 0, timeSinceLastServerMessage = 0;;
 int currentRound = -1;
+int lastTrainedRound = -1;
 bool waitingForMe = false;
 bool unsubscribeFromResume = false;
 bool sendingMessage = false;
+String selectedDatasetKey = "";
+String selectedDatasetBinName = "";
+String selectedDatasetMetaName = "";
+
+#ifdef DOUBLE_DATASET
+int datasetIndex = 0;
+#endif
+
+static String baseNameFromPath(const String& path) {
+    int idx = path.lastIndexOf('/');
+    if (idx < 0) {
+        return path;
+    }
+    return path.substring(idx + 1);
+}
+
+static String sanitizeDatasetKey(const String& rawKey) {
+    String key = rawKey;
+    key.replace("\\", "/");
+    while (key.startsWith("/")) {
+        key.remove(0, 1);
+    }
+    while (key.endsWith("/")) {
+        key.remove(key.length() - 1, 1);
+    }
+    return key;
+}
+
+static bool hasBinExtension(const String& fileName) {
+    String lower = fileName;
+    lower.toLowerCase();
+    return lower.endsWith(".bin");
+}
+
+static String findBinFileInDatasetFolder(const String& datasetFolder) {
+    String folder = sanitizeDatasetKey(datasetFolder);
+    if (folder.length() == 0) {
+        return "";
+    }
+
+    String folderPath = "/" + folder;
+    File dir = LittleFS.open(folderPath, "r");
+    if (!dir || !dir.isDirectory()) {
+        D_println("[WRN] findBinFileInDatasetFolder: " + folderPath + " is not a directory or missing");
+        return "";
+    }
+
+    // Try to find a file that matches this device's ID (e.g., esp01 looks for "*01.bin")
+    String clientId = String(CLIENT_NAME);
+    String idSuffix = "";
+    for (int i = 0; i < clientId.length(); i++) {
+        if (isDigit(clientId[i])) {
+            idSuffix += clientId[i];
+        }
+    }
+
+    D_println("[DBG] findBinFileInDatasetFolder: Searching " + folderPath + " (ID suffix: " + idSuffix + ")");
+
+    String firstFallback = "";
+    File file = dir.openNextFile();
+    while (file) {
+        String foundName = file.name();
+        file.close();
+
+        if (hasBinExtension(foundName)) {
+            // Ensure fullPath starts with folderPath
+            String fullPath = foundName;
+            if (!fullPath.startsWith(folderPath)) {
+                if (fullPath.startsWith("/")) {
+                    fullPath = folderPath + fullPath;
+                } else {
+                    fullPath = folderPath + "/" + fullPath;
+                }
+            }
+            if (!fullPath.startsWith("/")) {
+                fullPath = "/" + fullPath;
+            }
+
+            String nameOnly = baseNameFromPath(fullPath);
+
+            // Check if it matches ID suffix
+            if (idSuffix.length() > 0 && nameOnly.indexOf(idSuffix + ".bin") != -1) {
+                D_println("[DBG] Found ID-matched bin: " + fullPath);
+                dir.close();
+                return fullPath;
+            }
+            if (firstFallback == "") {
+                firstFallback = fullPath;
+            }
+        }
+        file = dir.openNextFile();
+    }
+
+    dir.close();
+
+    if (firstFallback != "") {
+        D_println("[DBG] No ID-matched bin found, using first available fallback: " + firstFallback);
+    }
+    return firstFallback;
+}
+
+static void resolveTrainingPaths(String& trainPath, String& metaPath) {
+    trainPath = XY_TRAIN_PATH;
+    metaPath = METADATA_JSON_PATH;
+#ifdef DOUBLE_DATASET
+    if (datasetIndex == 1) {
+        trainPath = XY_TRAIN_PATH_2;
+        metaPath = METADATA_JSON_PATH_2;
+    }
+#endif
+
+    if (selectedDatasetKey.length() == 0) {
+        D_println("[DBG] No dataset key, using default paths: " + trainPath + " | " + metaPath);
+        return;
+    }
+
+    String key = sanitizeDatasetKey(selectedDatasetKey);
+    String defaultMeta = metaPath;
+
+    // Check if filenames were provided in the command, otherwise use defaults from Config.h
+    String trainFileName = selectedDatasetBinName.length() > 0 ? selectedDatasetBinName : baseNameFromPath(trainPath);
+    String metaFileName = selectedDatasetMetaName.length() > 0 ? selectedDatasetMetaName : baseNameFromPath(metaPath);
+
+    trainPath = "/" + key + "/" + trainFileName;
+    metaPath = "/" + key + "/" + metaFileName;
+
+    D_println("[DBG] Resolving for dataset '" + key + "'. Target: " + trainPath);
+
+    // If the expected dataset bin is missing, try to find ANY .bin inside the dataset folder
+    if (!LittleFS.exists(trainPath)) {
+        String fallbackBinPath = findBinFileInDatasetFolder(key);
+        if (fallbackBinPath.length() > 0) {
+            D_println("[DBG] " + trainPath + " not found, using fallback " + fallbackBinPath);
+            trainPath = fallbackBinPath;
+        }
+    }
+
+    // Handle metadata fallback logic
+    if (!LittleFS.exists(metaPath)) {
+        String folderMeta = "/" + key + "/metadata.json";
+        if (LittleFS.exists(folderMeta)) {
+            D_println("[DBG] " + metaPath + " not found, using folder metadata " + folderMeta);
+            metaPath = folderMeta;
+        } else if (LittleFS.exists(defaultMeta)) {
+            D_println("[DBG] " + metaPath + " not found in dataset folder, using global fallback " + defaultMeta);
+            metaPath = defaultMeta;
+        }
+    }
+}
+
+static void resetWifiStationState() {
+    WiFi.disconnect(true, true);
+    WiFi.mode(WIFI_OFF);
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    delay(200);
+    WiFi.mode(WIFI_STA);
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(true);
+    WiFi.setSleep(false);
+    delay(200);
+}
+
+#ifdef DOUBLE_DATASET
+void loadDatasetIndex() {
+    if (LittleFS.exists(DOUBLE_DATASET_CONFIG_PATH)) {
+        File f = LittleFS.open(DOUBLE_DATASET_CONFIG_PATH, "r");
+        if (f) {
+            String s = f.readString();
+            datasetIndex = s.toInt();
+            f.close();
+        }
+    }
+    D_println("Current dataset index: " + String(datasetIndex));
+}
+
+void saveDatasetIndex() {
+    File f = LittleFS.open(DOUBLE_DATASET_CONFIG_PATH, "w");
+    if (f) {
+        f.print(datasetIndex);
+        f.close();
+    }
+}
+
+void switchDatasetIndex() {
+    datasetIndex = (datasetIndex + 1) % 2;
+    saveDatasetIndex();
+    D_println("Switched dataset index to: " + String(datasetIndex));
+}
+#endif
 
 File xTest, yTest;
 // TODO Write into file while receiving the payload to avoid using too much memory.
@@ -96,6 +293,10 @@ void bootUp(bool initBaseModel) {
         return;
     }
 
+#ifdef DOUBLE_DATASET
+    loadDatasetIndex();
+#endif
+
     if (!loadDeviceDefinitions()) {
         return;
     }
@@ -104,20 +305,34 @@ void bootUp(bool initBaseModel) {
     D_println("Booting up...");
 
     bool configurationLoaded = loadDeviceConfig();
+#ifdef DOUBLE_DATASET
+    loadOtherDeviceConfig();
+#endif
     bool resumeTraining = false;
 
     if (configurationLoaded) {
         if (deviceConfig->currentRound != -1 && deviceConfig->currentFederateState != FederateState_NONE) {
             currentRound = deviceConfig->currentRound;
+            lastTrainedRound = deviceConfig->lastTrainedRound;
             federateState = deviceConfig->currentFederateState;
             if (deviceConfig->currentFederateState != FederateState_NONE && deviceConfig->loadedFederateModelConfig != nullptr) {
                 federateModelConfig = deviceConfig->loadedFederateModelConfig;
                 deviceConfig->loadedFederateModelConfig = NULL;
+                if (deviceConfig->newModelState == ModelState_READY_TO_TRAIN) {
+                    if (deviceConfig->lastTrainedRound == currentRound) {
+                        D_println("Already trained this round, skipping.");
+                        newModelState = ModelState_IDLE;
+                    } else {
+                        setupFederatedModel();
+                    }
+                }
             }
             resumeTraining = true;
-            if (deviceConfig->newModelState != ModelState_IDLE) {
-                // It was not done trainning or it was transmitting or just transmitted before saving
+            if (deviceConfig->newModelState == ModelState_MODEL_BUSY || deviceConfig->newModelState == ModelState_DONE_TRAINING) {
+                // If it was busy or done but not cleared, reset to IDLE to avoid stuck state
                 newModelState = ModelState_IDLE;
+            } else {
+                 newModelState = deviceConfig->newModelState;
             }
         }
     }
@@ -126,11 +341,18 @@ void bootUp(bool initBaseModel) {
     fixedMemoryUsage.loadConfig = info.total_free_bytes;
 
     if (initBaseModel) {
-        if (LittleFS.exists(MODEL_PATH)) {
+        String modelPath = MODEL_PATH;
+#ifdef DOUBLE_DATASET
+        if (datasetIndex == 1) {
+            modelPath = MODEL_PATH_2;
+        }
+#endif
+
+        if (LittleFS.exists(modelPath)) {
             if (currentModel != NULL) {
             delete currentModel;
         }
-        currentModel = loadModelFromFlash(MODEL_PATH);
+        currentModel = loadModelFromFlash(modelPath);
         if (configurationLoaded) {
             // Store the reference to the current model metrics since it's store in the heap
             currentModelMetrics = deviceConfig->currentModelMetrics;
@@ -152,11 +374,20 @@ void bootUp(bool initBaseModel) {
             }
             printMemory();
             #ifdef DATASET_BINARY
-            currentModelMetrics = trainModelFromBinaryDataset(*currentModel, *localModelConfig, XY_TRAIN_PATH, METADATA_JSON_PATH);
+            String trainPath;
+            String metaPath;
+            resolveTrainingPaths(trainPath, metaPath);
+            D_println("Training dataset paths: " + trainPath + " | " + metaPath);
+                        if (isJulianaBinaryDataset(metaPath)) {
+                            currentModelMetrics = trainModelFromJulianaBinaryDataset(*currentModel, *localModelConfig, trainPath, metaPath);
+                        } else {
+                            currentModelMetrics = trainModelFromBinaryDataset(*currentModel, *localModelConfig, trainPath, metaPath);
+                        }
             #else
+            // TODO: Handle double dataset
             currentModelMetrics = trainModelFromOriginalDataset(*currentModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
             #endif
-            if (saveModelToFlash(*currentModel, MODEL_PATH)) {
+            if (saveModelToFlash(*currentModel, modelPath)) {
                 saveDeviceConfig();
             }
         }
@@ -292,7 +523,63 @@ model* transformDataToModel(Stream& stream) {
     return m;
 }
 
+static JsonArray resolveSchema(JsonDocument& doc) {
+    JsonArray schema = doc["schema"];
+    if (schema.isNull() || schema.size() == 0) {
+        D_println("[DBG] Schema not found at root or empty. Checking nested locations...");
+        if (doc["binary"]["schema"].is<JsonArray>()) {
+            schema = doc["binary"]["schema"];
+            D_println("[DBG] Found schema in 'binary.schema'");
+        } else if (selectedDatasetKey.length() > 0 && doc["shards"].is<JsonArray>()) {
+            D_println("[DBG] Searching shards for key: " + selectedDatasetKey);
+            for (JsonObject shard : doc["shards"].as<JsonArray>()) {
+                String dir = shard["directory"] | "";
+                if (dir == selectedDatasetKey) {
+                    if (shard["schema"].is<JsonArray>()) {
+                        schema = shard["schema"];
+                        D_println("[DBG] Found schema in 'shards' group for directory: " + dir);
+                    }
+                    break;
+                }
+            }
+        }
+    } else {
+        D_println("[DBG] Found schema at root. Columns: " + String(schema.size()));
+    }
+
+    if (schema.isNull() || schema.size() == 0) {
+        D_println("[WRN] resolveSchema could not find a valid schema array. Root keys present:");
+        for (JsonPair kv : doc.as<JsonObject>()) {
+            D_println("  - " + String(kv.key().c_str()));
+        }
+    }
+
+    return schema;
+}
+
 #ifdef DATASET_BINARY
+bool isJulianaBinaryDataset(const String& meta_file) {
+    if (!LittleFS.exists(meta_file)) {
+        return false;
+    }
+
+    File metaF = LittleFS.open(meta_file, "r");
+    if (!metaF) {
+        return false;
+    }
+
+    JsonDocument doc;
+    DeserializationError derr = deserializeJson(doc, metaF);
+    metaF.close();
+    if (derr != DeserializationError::Ok) {
+        D_println("Failed to parse metadata JSON for Juliana check: " + String(derr.c_str()));
+        return false;
+    }
+
+    const char* label_col = doc["label_column"] | "activityID";
+    return strcmp(label_col, "ocupada") == 0;
+}
+
 multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, ModelConfig& config, const String& bin_file, const String& meta_file) {
     D_println("Training model from binary dataset...");
     printTiming(true);
@@ -314,11 +601,11 @@ multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, Mode
     DeserializationError derr = deserializeJson(doc, metaF);
     metaF.close();
     if (derr) {
-        D_println("Failed to parse metadata JSON");
+        D_println("Failed to parse metadata JSON: " + String(derr.c_str()));
         return NULL;
     }
 
-    JsonArray schema = doc["schema"];
+    JsonArray schema = resolveSchema(doc);
     const char* label_col = doc["label_column"] | "activityID";
     JsonArray label_vals = doc["label_values"];
     std::vector<long> label_values;
@@ -355,8 +642,14 @@ multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, Mode
             input_indices.push_back((int)i);
         }
     }
+
     if (label_index < 0) {
         D_println("Label column not found in schema");
+        return NULL;
+    }
+
+    if (input_indices.size() != NN.layers[0]._numberOfInputs) {
+        D_println("[ERR] Dataset features (" + String(input_indices.size()) + ") do not match model inputs (" + String(NN.layers[0]._numberOfInputs) + ").");
         return NULL;
     }
 
@@ -423,7 +716,7 @@ multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, Mode
             }
 
             // Debug: print sample parsed X for first rows and periodic samples
-            if ((int)datasetSize <= DBG_FIRST_ROWS || (datasetSize % DBG_EVERY_N) == 0) {
+            /*if ((int)datasetSize <= DBG_FIRST_ROWS || (datasetSize % DBG_EVERY_N) == 0) {
                 D_println("[DBG] Row #" + String(datasetSize) + " parsed -- first few features:");
                 String s = "";
                 for (size_t xi = 0; xi < input_indices.size(); ++xi) {
@@ -432,7 +725,7 @@ multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, Mode
                     if (xi > 30) { s += ", ..."; break; }
                 }
                 D_println(s);
-            }
+            }*/
 
             // parse label and build one-hot y
             long labelVal = 0;
@@ -460,14 +753,14 @@ multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, Mode
             }
 
             // Debug: print y (one-hot) for the same sample rows
-            if ((int)datasetSize <= DBG_FIRST_ROWS || (datasetSize % DBG_EVERY_N) == 0) {
+            /*if ((int)datasetSize <= DBG_FIRST_ROWS || (datasetSize % DBG_EVERY_N) == 0) {
                 String ys = "[DBG] y: ";
                 for (unsigned int k = 0; k < metrics->numberOfClasses; ++k) {
                     ys += String((int)y[k]);
                     if (k < metrics->numberOfClasses - 1) ys += ",";
                 }
                 D_println(ys);
-            }
+            }*/
 
             // Train model
             IDFLOAT* predictions = NN.FeedForward(x);
@@ -541,6 +834,192 @@ multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, Mode
     binF.close();
     printTiming();
     D_println("Binary training complete.");
+    return metrics;
+}
+
+multiClassClassifierMetrics* trainModelFromJulianaBinaryDataset(NeuralNetwork& NN, ModelConfig& config, const String& bin_file, const String& meta_file) {
+    D_println("Training model from Juliana binary dataset...");
+    printTiming(true);
+
+    unsigned long initTime = millis();
+    datasetSize = 0;
+
+    if (!LittleFS.exists(meta_file)) {
+        D_println("Metadata file not found");
+        return NULL;
+    }
+
+    File metaF = LittleFS.open(meta_file, "r");
+    if (!metaF) {
+        D_println("Failed to open metadata file");
+        return NULL;
+    }
+
+    JsonDocument doc;
+    DeserializationError derr = deserializeJson(doc, metaF);
+    metaF.close();
+    if (derr) {
+        D_println("Failed to parse metadata JSON: " + String(derr.c_str()));
+        return NULL;
+    }
+
+    JsonArray schema = resolveSchema(doc);
+    const char* label_col = doc["label_column"] | "ocupada";
+    if (strcmp(label_col, "ocupada") != 0) {
+        D_println("Metadata does not describe the Juliana dataset");
+        return NULL;
+    }
+
+    struct Col { String name; String type; int bytes; int offset; };
+    std::vector<Col> cols;
+    int row_size = 0;
+    for (JsonObject c : schema) {
+        Col col;
+        col.name = String((const char*)c["name"]);
+        col.type = String((const char*)c["type"]);
+        col.bytes = c["bytes"] | 0;
+        col.offset = c["offset"] | 0;
+        cols.push_back(col);
+        row_size += col.bytes;
+    }
+
+    D_println("[DBG] Parsed Juliana schema columns: " + String(cols.size()));
+    D_println("[DBG] Computed row_size: " + String(row_size));
+
+    std::vector<int> input_indices;
+    int label_index = -1;
+    for (size_t i = 0; i < cols.size(); ++i) {
+        if (cols[i].name == String(label_col)) {
+            label_index = (int)i;
+        } else {
+            input_indices.push_back((int)i);
+        }
+    }
+
+    if (label_index < 0) {
+        D_println("Label column not found in schema");
+        return NULL;
+    }
+
+    if (input_indices.size() != NN.layers[0]._numberOfInputs) {
+        D_println("[ERR] Juliana dataset features (" + String(input_indices.size()) + ") do not match model inputs (" + String(NN.layers[0]._numberOfInputs) + ").");
+        return NULL;
+    }
+
+    D_println("[DBG] Input feature count: " + String(input_indices.size()));
+    D_println("[DBG] Label column index: " + String(label_index) + " (name='" + String(label_col) + "')");
+
+    File binF = LittleFS.open(bin_file, "r");
+    if (!binF) {
+        D_println("Failed to open binary file");
+        return NULL;
+    }
+
+    uint8_t* rowbuf = (uint8_t*)malloc(row_size);
+    if (!rowbuf) {
+        D_println("Failed to allocate row buffer");
+        binF.close();
+        return NULL;
+    }
+
+    IDFLOAT* x = new IDFLOAT[NN.layers[0]._numberOfInputs];
+    IDFLOAT* y = new IDFLOAT[NN.layers[NN.numberOflayers - 1]._numberOfOutputs];
+
+    D_println("[DBG] NN expected input size: " + String(NN.layers[0]._numberOfInputs) + ", parsed feature count: " + String(input_indices.size()));
+    D_println("[DBG] NN output size (num classes): " + String(NN.layers[NN.numberOflayers - 1]._numberOfOutputs));
+
+    multiClassClassifierMetrics* metrics = new multiClassClassifierMetrics;
+    metrics->numberOfClasses = NN.layers[NN.numberOflayers - 1]._numberOfOutputs;
+    metrics->metrics = new classClassifierMetricts[metrics->numberOfClasses];
+
+    const int DBG_FIRST_ROWS = 5;
+    const int DBG_EVERY_N = 5000;
+    for (int epoch = 0; epoch < config.epochs; ++epoch) {
+        D_println("Epoch: " + String(epoch + 1));
+        binF.seek(0);
+
+        while (binF.available() >= row_size) {
+            size_t n = binF.read(rowbuf, row_size);
+            if (n != (size_t)row_size) break;
+            datasetSize++;
+
+            for (size_t i = 0; i < input_indices.size(); ++i) {
+                int ci = input_indices[i];
+                Col& c = cols[ci];
+                float val = 0.0f;
+                if (c.type == "float32") {
+                    float v; memcpy(&v, rowbuf + c.offset, 4); val = v;
+                } else if (c.type == "uint8") {
+                    uint8_t v = *(uint8_t*)(rowbuf + c.offset); val = (float)v;
+                } else if (c.type == "int32") {
+                    int32_t v; memcpy(&v, rowbuf + c.offset, 4); val = (float)v;
+                } else if (c.type == "int8") {
+                    int8_t v = *(int8_t*)(rowbuf + c.offset); val = (float)v;
+                }
+                x[i] = (IDFLOAT)val;
+            }
+
+            long labelVal = 0;
+            Col& lc = cols[label_index];
+            if (lc.type == "uint8") { uint8_t v; memcpy(&v, rowbuf + lc.offset, 1); labelVal = v; }
+            else if (lc.type == "int8") { int8_t v; memcpy(&v, rowbuf + lc.offset, 1); labelVal = v; }
+            else if (lc.type == "int32") { int32_t v; memcpy(&v, rowbuf + lc.offset, 4); labelVal = v; }
+            else { int32_t v; memcpy(&v, rowbuf + lc.offset, 4); labelVal = v; }
+
+            for (unsigned int k = 0; k < metrics->numberOfClasses; ++k) {
+                y[k] = (IDFLOAT)0.0;
+            }
+            if (metrics->numberOfClasses == 1) {
+                y[0] = (IDFLOAT)((labelVal != 0) ? 1.0 : 0.0);
+            } else {
+                unsigned int classIndex = (labelVal <= 0) ? 0u : 1u;
+                if (classIndex >= metrics->numberOfClasses) {
+                    classIndex = metrics->numberOfClasses - 1;
+                }
+                y[classIndex] = (IDFLOAT)1.0;
+            }
+
+            IDFLOAT* predictions = NN.FeedForward(x);
+            NN.BackProp(y);
+            metrics->meanSqrdError = NN.getMeanSqrdError(1);
+
+            {
+                double mse = (double)metrics->meanSqrdError;
+                if (!isfinite(mse) || isnan(mse)) {
+                    D_println("[ERR] Gradient explosion detected (meanSqrdError is NaN/Inf)");
+                    D_println("[ERR] Epoch: " + String(epoch + 1) + "  Row#: " + String(datasetSize));
+                    metrics->trainingTime = millis() - initTime;
+                    metrics->epochs = config.epochs;
+                    delete[] x;
+                    delete[] y;
+                    free(rowbuf);
+                    binF.close();
+                    D_println("[ERR] Aborting training due to gradient explosion.");
+                    return metrics;
+                }
+            }
+
+            for (int i = 0; i < metrics->numberOfClasses; i++) {
+                if (y[i] == 1) {
+                    if (predictions[i] >= 0.5) metrics->metrics[i].truePositives++;
+                    else metrics->metrics[i].falseNegatives++;
+                } else {
+                    if (predictions[i] >= 0.5) metrics->metrics[i].falsePositives++;
+                    else metrics->metrics[i].trueNegatives++;
+                }
+            }
+        }
+    }
+
+    metrics->trainingTime = millis() - initTime;
+    metrics->epochs = config.epochs;
+
+    delete[] x;
+    delete[] y;
+    free(rowbuf);
+    binF.close();
+    printTiming();
+    D_println("Juliana binary training complete.");
     return metrics;
 }
 #endif
@@ -803,11 +1282,8 @@ void setupResume() {
 
 void setupMQTT(bool resume) {
     D_println("Setting up MQTT...");
-
     WiFi.setTxPower(WIFI_POWER_MINUS_1dBm);
-
     D_println("power set");
-    
     connectToWifi(true);
     if (connectToServerMQTT()) {
         D_println("Connected to MQTT server");
@@ -833,31 +1309,164 @@ void setupMQTT(bool resume) {
             D_println("Command: " + String(doc["command"].as<const char*>()));
             const char* command = doc["command"];
 
-            if (strcmp(command, "request_model") == 0) {
-                sendModelToNetwork(*currentModel, *currentModelMetrics);
-                if (federateState == FederateState_TRAINING) {
-                    if (newModel != NULL)
-                        delete newModel;
-                    if (newModelMetrics != NULL)
-                        delete newModelMetrics;
-                    newModelState = ModelState_IDLE;
+            // Check if command is targeted at specific client
+            bool isMe = true;
+            bool isOther = false;
+            if (doc.containsKey("client")) {
+                const char* client = doc["client"];
+                if (strcmp(client, CLIENT_NAME) != 0) {
+                    isMe = false;
+                    #ifdef DOUBLE_DATASET
+                    if (OTHER_CLIENT_NAME != NULL && strcmp(client, OTHER_CLIENT_NAME) == 0) {
+                        isOther = true;
+                    }
+                    #endif
                 }
+            } else if (doc.containsKey("clients")) {
+                // If it's a list, check if we OR other are in it
+                JsonArray clients = doc["clients"];
+                isMe = false;
+                for (int i = 0; i < clients.size(); i++) {
+                    if (strcmp(clients[i].as<const char*>(), CLIENT_NAME) == 0) {
+                        isMe = true;
+                        break;
+                    }
+                    #ifdef DOUBLE_DATASET
+                    if (OTHER_CLIENT_NAME != NULL && strcmp(clients[i].as<const char*>(), OTHER_CLIENT_NAME) == 0) {
+                        isOther = true;
+                        // Don't break here, we might need to know if both are targeted?
+                        // Actually, if both are targeted, we handle 'isMe' logic, and possibly 'isOther' logic.
+                    }
+                    #endif
+                }
+            }
+
+            if (strcmp(command, "request_model") == 0) {
+                // Only respond if it targets me? Or broadcast? Protocol is unclear on broadcast vs target.
+                // Assuming targeted if 'client' field exists, otherwise broadcast.
+                if (isMe || (!doc.containsKey("client") && !doc.containsKey("clients"))) {
+                    sendModelToNetwork(*currentModel, *currentModelMetrics);
+                    if (federateState == FederateState_TRAINING) {
+                        if (newModel != NULL)
+                            delete newModel;
+                        if (newModelMetrics != NULL)
+                            delete newModelMetrics;
+                        newModelState = ModelState_IDLE;
+                    }
+                }
+                // TODO: Handle isOther? We cannot send model for other device as we don't have its state loaded completely.
             } else if (strcmp(command, "federate_join") == 0) {
                 if (federateState == FederateState_NONE) {
                     federateState = FederateState_SUBSCRIBED;
                     saveDeviceConfig();
                     sendMessageToNetwork(FederateCommand_JOIN);
                 }
+                #ifdef DOUBLE_DATASET
+                if (OTHER_CLIENT_NAME != NULL) {
+                     // We should probably also join for the other client if it's not subscribed?
+                     // But we don't know its state without reading its config.
+                     // Assuming we should just announce it.
+                     // If we are simulating 2 devices, we should try to keep them in sync or just join both.
+                     sendMessageToNetwork(FederateCommand_JOIN, OTHER_CLIENT_NAME);
+                     
+                     // Also ensure config is updated for other client to be in SUBSCRIBED state
+                     String otherConfigPath = (datasetIndex == 0) ? CONFIGURATION_PATH_2 : CONFIGURATION_PATH;
+                     if (LittleFS.exists(otherConfigPath)) {
+                        File f = LittleFS.open(otherConfigPath, "r");
+                        if (f) {
+                            JsonDocument otherDoc;
+                            deserializeJson(otherDoc, f);
+                            f.close();
+                            if ((int)otherDoc["federateState"] == (int)FederateState_NONE) {
+                                otherDoc["federateState"] = (int)FederateState_SUBSCRIBED;
+                                File f2 = LittleFS.open(otherConfigPath, "w");
+                                if (f2) {
+                                    serializeJson(otherDoc, f2);
+                                    f2.close();
+                                }
+                            }
+                        }
+                     }
+                }
+                #endif
             } else if (strcmp(command, "federate_unsubscribe") == 0) {
-                if (federateState != FederateState_NONE) {
-                    federateState = FederateState_NONE;
-                    currentRound = -1;
-                    sendMessageToNetwork(FederateCommand_LEAVE);
-                    saveDeviceConfig();
+                if (isMe) {
+                    if (federateState != FederateState_NONE) {
+                        federateState = FederateState_NONE;
+                        currentRound = -1;
+                        lastTrainedRound = -1;
+                        sendMessageToNetwork(FederateCommand_LEAVE);
+                        saveDeviceConfig();
+                    }
+                }
+                if (isOther) {
+                    #ifdef DOUBLE_DATASET
+                    // We need to update the config file for the other device to set federateState = NONE
+                    String otherConfigPath = (datasetIndex == 0) ? CONFIGURATION_PATH_2 : CONFIGURATION_PATH;
+                    // Load, modify, save
+                    if (LittleFS.exists(otherConfigPath)) {
+                        File f = LittleFS.open(otherConfigPath, "r");
+                        if (f) {
+                            JsonDocument otherDoc;
+                            deserializeJson(otherDoc, f);
+                            f.close();
+                            otherDoc["federateState"] = (int)FederateState_NONE;
+                            otherDoc["currentRound"] = -1;
+                            otherDoc["lastTrainedRound"] = -1;
+                            File f2 = LittleFS.open(otherConfigPath, "w");
+                            if (f2) {
+                                serializeJson(otherDoc, f2);
+                                f2.close();
+                                // Send LEAVE for other
+                                // Manual leave message construction since sendMessageToNetwork doesn't support LEAVE param with client name in current enum/helper?
+                                // Actually we don't have LEAVE in enum logic in sendMessageToNetwork helper properly for generic client,
+                                // but we can add or just construct json here.
+                                // Wait, sendMessageToNetwork has FederateCommand_LEAVE?
+                                // The switch(command) in sendMessageToNetwork didn't show LEAVE case in previous read_file output?
+                                // Let's check sendMessageToNetwork again. It had JOIN, RESUME, ALIVE.
+                                // Ah, the existing code called sendMessageToNetwork(FederateCommand_LEAVE) but I didn't see it in switch?
+                                // Maybe it was implicit/missing or I missed it.
+                                // Let's check existing code for federate_unsubscribe block.
+                                // It calls sendMessageToNetwork(FederateCommand_LEAVE);
+                                // But looking at sendMessageToNetwork implementation earlier...
+                                // It switch(command): JOIN, RESUME, ALIVE.
+                                // Default? No default.
+                                // So LEAVE might be doing nothing?
+                            }
+                        }
+                    }
+                    #endif
                 }
             } else if (strcmp(command, "federate_start") == 0) {
                 if (federateState == FederateState_SUBSCRIBED) {
                     if (doc["config"].is<JsonObject>()) {
+                        if (doc["database"].is<const char*>()) {
+                            selectedDatasetKey = sanitizeDatasetKey(String(doc["database"].as<const char*>()));
+                        } else if (doc["dataset"].is<const char*>()) {
+                            selectedDatasetKey = sanitizeDatasetKey(String(doc["dataset"].as<const char*>()));
+                        } else if (doc["datasetKey"].is<const char*>()) {
+                            selectedDatasetKey = sanitizeDatasetKey(String(doc["datasetKey"].as<const char*>()));
+                        } else {
+                            selectedDatasetKey = "";
+                        }
+
+                        if (doc["datasetBin"].is<const char*>()) {
+                            selectedDatasetBinName = baseNameFromPath(String(doc["datasetBin"].as<const char*>()));
+                        } else {
+                            selectedDatasetBinName = "";
+                        }
+                        if (doc["datasetMeta"].is<const char*>()) {
+                            selectedDatasetMetaName = baseNameFromPath(String(doc["datasetMeta"].as<const char*>()));
+                        } else {
+                            selectedDatasetMetaName = "";
+                        }
+
+                        if (selectedDatasetKey.length() > 0) {
+                            D_println("Selected dataset key: " + selectedDatasetKey);
+                        } else {
+                            D_println("No dataset key provided; using Config.h default dataset paths");
+                        }
+
                         unsigned int* federateLayers = new unsigned int[doc["config"]["layers"].size()];
                         for (int i = 0; i < doc["config"]["layers"].size(); i++) {
                             federateLayers[i] = doc["config"]["layers"][i].as<unsigned int>();
@@ -880,38 +1489,137 @@ void setupMQTT(bool resume) {
                         if (doc["config"]["learningRateOfBiases"].is<IDFLOAT>()) {
                             federateModelConfig->learningRateOfBiases = doc["config"]["learningRateOfBiases"].as<IDFLOAT>();
                         }
+                        if (doc["config"]["jsonWeights"].is<bool>()) {
+                            federateModelConfig->jsonWeights = doc["config"]["jsonWeights"].as<bool>();
+                        }
                         federateState = FederateState_TRAINING;
                         currentRound = 0;
+                        lastTrainedRound = -1;
                         setupFederatedModel();
                         saveDeviceConfig();
                     }
                 }
+                
+                #ifdef DOUBLE_DATASET
+                if (OTHER_CLIENT_NAME != NULL) {
+                     String otherConfigPath = (datasetIndex == 0) ? CONFIGURATION_PATH_2 : CONFIGURATION_PATH;
+                     if (LittleFS.exists(otherConfigPath)) {
+                        File f = LittleFS.open(otherConfigPath, "r");
+                        if (f) {
+                            JsonDocument otherDoc;
+                            deserializeJson(otherDoc, f);
+                            f.close();
+                            // If is subscribed OR is already training (could be restart?) OR even NONE if we want to force start?
+                            // Let's stick to subscribed or training.
+                            int otherState = (int)otherDoc["federateState"];
+                            if (otherState == (int)FederateState_SUBSCRIBED || otherState == (int)FederateState_TRAINING) {
+                                otherDoc["federateState"] = (int)FederateState_TRAINING;
+                                otherDoc["currentRound"] = 0;
+                                otherDoc["lastTrainedRound"] = -1;
+                                otherDoc["modelState"] = (int)ModelState_READY_TO_TRAIN;
+                                if (selectedDatasetKey.length() > 0) {
+                                    otherDoc["datasetKey"] = selectedDatasetKey;
+                                } else {
+                                    otherDoc.remove("datasetKey");
+                                }
+                                if (selectedDatasetBinName.length() > 0) {
+                                    otherDoc["datasetBin"] = selectedDatasetBinName;
+                                } else {
+                                    otherDoc.remove("datasetBin");
+                                }
+                                if (selectedDatasetMetaName.length() > 0) {
+                                    otherDoc["datasetMeta"] = selectedDatasetMetaName;
+                                } else {
+                                    otherDoc.remove("datasetMeta");
+                                }
+                                otherDoc["federateModelConfig"] = doc["config"]; 
+                                
+                                File f2 = LittleFS.open(otherConfigPath, "w");
+                                if (f2) {
+                                    serializeJson(otherDoc, f2);
+                                    f2.close();
+                                }
+                            }
+                        }
+                     }
+                }
+                #endif
+
             } else if (strcmp(command, "federate_end") == 0) {
                 if (federateState != FederateState_NONE) {
                     federateState = FederateState_DONE;
                     currentRound = -1;
                     saveDeviceConfig();
                 }
+                #ifdef DOUBLE_DATASET
+                if (OTHER_CLIENT_NAME != NULL) {
+                     String otherConfigPath = (datasetIndex == 0) ? CONFIGURATION_PATH_2 : CONFIGURATION_PATH;
+                     if (LittleFS.exists(otherConfigPath)) {
+                        File f = LittleFS.open(otherConfigPath, "r");
+                         if (f) {
+                            JsonDocument otherDoc;
+                            deserializeJson(otherDoc, f);
+                            f.close();
+                            if ((int)otherDoc["federateState"] != (int)FederateState_NONE) {
+                                otherDoc["federateState"] = (int)FederateState_DONE;
+                                otherDoc["currentRound"] = -1;
+                                File f2 = LittleFS.open(otherConfigPath, "w");
+                                if (f2) {
+                                    serializeJson(otherDoc, f2);
+                                    f2.close();
+                                }
+                            }
+                         }
+                     }
+                }
+                #endif
             } else if (strcmp(command, "federate_stop") == 0) {
-                const char* client = doc["client"];
-                if (strcmp(client, CLIENT_NAME) == 0) {
+                if (isMe) {
                     federateState = FederateState_DONE;
                     currentRound = -1;
                     saveDeviceConfig();
                 }
+                if (isOther) {
+                    #ifdef DOUBLE_DATASET
+                     String otherConfigPath = (datasetIndex == 0) ? CONFIGURATION_PATH_2 : CONFIGURATION_PATH;
+                     // Update to DONE
+                     // Similar to federate_end logic but targeted
+                     if (LittleFS.exists(otherConfigPath)) {
+                        File f = LittleFS.open(otherConfigPath, "r");
+                         if (f) {
+                            JsonDocument otherDoc;
+                            deserializeJson(otherDoc, f);
+                            f.close();
+                            otherDoc["federateState"] = (int)FederateState_DONE;
+                            otherDoc["currentRound"] = -1;
+                            File f2 = LittleFS.open(otherConfigPath, "w");
+                            if (f2) {
+                                serializeJson(otherDoc, f2);
+                                f2.close();
+                            }
+                         }
+                     }
+                    #endif
+                }
             } else if (strcmp(command, "federate_resume") == 0) {
-                const char* client = doc["client"];
-                if (strcmp(client, CLIENT_NAME) == 0) {
+                if (isMe) {
                     D_println("Resuming training...");
                     if (currentRound == 0) {
-                        setupFederatedModel();
-                        D_println("Setup done");
+                        if (currentRound > lastTrainedRound) {
+                            setupFederatedModel();
+                            D_println("Setup done");
+                        } else {
+                            D_println("Already trained for round " + String(currentRound) + ", waiting for next round.");
+                        }
                     }
                 }
+                // isOther? If other accepts resume, it means it should be training.
+                // But it's not running. 
+                // We should probably just ensure its state is TRAINING in config? 
+                // But generally resume triggers immediate action. Active client actions.
+                // We can't do much for the inactive one here other than ensure state is preserved.
             } else if (strcmp(command, "federate_waiting") == 0) {
-                JsonArray clients = doc["clients"];
-                for (int i = 0; i < clients.size(); i++) {
-                    if (strcmp(clients[i].as<const char*>(), CLIENT_NAME) == 0) {
+                if (isMe) {
                         if (currentRound == doc["round"].as<int>() && newModelState == ModelState_IDLE) {
                             if (waitingForMe) {
                                 // TODO if we do not discard the sent/built newModel we could try to resend it, need a refactor for that
@@ -922,17 +1630,22 @@ void setupMQTT(bool resume) {
                                 waitingForMe = true;
                             }
                         } else {
-                            sendMessageToNetwork(FederateCommand_ALIVE);
-                            break;
+                            sendMessageToNetwork(FederateCommand_ALIVE, CLIENT_NAME);
                         }
-                    }
                 }
+                #ifdef DOUBLE_DATASET
+                if (isOther) {
+                    // Send ALIVE for other, giving it a chance to stay known
+                    sendMessageToNetwork(FederateCommand_ALIVE, OTHER_CLIENT_NAME);
+                }
+                #endif
             } else if (strcmp(command, "federate_alive") == 0) {
                 sendMessageToNetwork(FederateCommand_ALIVE);
             } else if (strcmp(command, "federate_reboot") == 0) {
                 if (federateState != FederateState_NONE) {
                     ESP.restart();
                 }
+                // If it's a global reboot, we reboot.
             }
         }
     });
@@ -1054,18 +1767,24 @@ void setupMQTT(bool resume) {
 
 bool connectToWifi(bool forever) {
     // ! If we disable the watchdog trigger this may cause the ESP32 to hang indefinitely, but even without disabling some devices got stuck inside here. There are alternatives to detect this, we could spawn a new Task that monitors the ESP32 health and try to recover from those cases.
-    WiFi.config(IPAddress(192, 168, 15, 40 + String(CLIENT_NAME).substring(3).toInt()), IPAddress(192, 168, 15, 1), IPAddress(255, 255, 255, 0));
-    D_println("wifi ip set");
+#if WIFI_USE_DHCP
+    D_println("WiFi mode: DHCP");
+#else
+    IPAddress staticIp(192, 168, 10, WIFI_STATIC_HOST_BASE + String(CLIENT_NAME).substring(3).toInt());
+    WiFi.config(staticIp, WIFI_STATIC_GATEWAY, WIFI_STATIC_SUBNET);
+    D_println("WiFi mode: manual, ip set to " + staticIp.toString());
+#endif
     if (WiFi.status() == WL_CONNECTED) {
         D_println("Already connected to Wifi");
         return true;
     }
     else {
         D_println("Connecting to wifi...");
-        // delay(500);
+        resetWifiStationState();
         WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         unsigned long startTime = millis();
         unsigned long timeout = CONNECTION_TIMEOUT; // 30 second timeout
+        unsigned long lastBegin = millis();
         while (WiFi.status() != WL_CONNECTED && (forever || millis() - startTime < timeout)) {
             switch(WiFi.status()) {
                 case WL_NO_SSID_AVAIL:
@@ -1076,26 +1795,21 @@ bool connectToWifi(bool forever) {
                     break;
                 case WL_DISCONNECTED:
                     D_println("Disconnected from Wifi");
-                    // delay(500);
-                    // D_println("persistent");
-                    // WiFi.persistent(false);
-                    // delay(500);
-                    // D_println("force disconnect");
-                    // WiFi.disconnect(true, true);
-                    // delay(500);
-                    // D_println("rebegin wifi");
-                    // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-                    // delay(500);
+                    if (millis() - lastBegin > 3000) {
+                        resetWifiStationState();
+                        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+                        lastBegin = millis();
+                        D_println("Retrying WiFi.begin() after disconnect");
+                    }
                     break;
                 case WL_IDLE_STATUS:
                     D_println("Wifi idle status");
-                    // delay(500);
-                    // WiFi.persistent(false);
-                    // delay(500);
-                    // WiFi.disconnect(true, true);
-                    // delay(500);
-                    // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-                    // delay(500);
+                    if (millis() - lastBegin > 3000) {
+                        resetWifiStationState();
+                        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+                        lastBegin = millis();
+                        D_println("Retrying WiFi.begin() after idle status");
+                    }
                     break;
                 case WL_CONNECTED:
                     D_println("Wifi connected");
@@ -1146,7 +1860,7 @@ const char* modelStateToString(ModelState state) {
     }
 }
 
-void sendMessageToNetwork(FederateCommand command) {
+void sendMessageToNetwork(FederateCommand command, const char* clientName) {
     if (!ensureConnected()) {
         D_println("Not connected to the network");
         return;
@@ -1157,7 +1871,7 @@ void sendMessageToNetwork(FederateCommand command) {
     }
     sendingMessage = true;
 
-    D_println("Sending command to the network...");
+    D_println("Sending command to the network for client: " + String(clientName));
 
     JsonDocument doc;
 
@@ -1166,12 +1880,16 @@ void sendMessageToNetwork(FederateCommand command) {
     case FederateCommand_JOIN: {
 
         doc["command"] = "join";
-        doc["client"] = CLIENT_NAME;
-        /*doc["metrics"] = JsonObject();
+        doc["client"] = clientName;
+        doc["metrics"] = JsonObject();
         doc["metrics"]["accuracy"] = currentModelMetrics->accuracy();
         doc["metrics"]["precision"] = currentModelMetrics->precision();
         doc["metrics"]["recall"] = currentModelMetrics->recall();
         doc["metrics"]["f1Score"] = currentModelMetrics->f1Score();
+        doc["metrics"]["balancedAccuracy"] = currentModelMetrics->balancedAccuracy();
+        doc["metrics"]["balancedPrecision"] = currentModelMetrics->balancedPrecision();
+        doc["metrics"]["balancedRecall"] = currentModelMetrics->balancedRecall();
+        doc["metrics"]["balancedF1Score"] = currentModelMetrics->balancedF1Score();
         doc["metrics"]["meanSqrdError"] = currentModelMetrics->meanSqrdError;
         doc["metrics"]["numberOfClasses"] = currentModelMetrics->numberOfClasses;
         doc["metrics"]["truePositives"] = JsonArray();
@@ -1183,7 +1901,7 @@ void sendMessageToNetwork(FederateCommand command) {
             doc["metrics"]["falsePositives"].add(currentModelMetrics->metrics[i].falsePositives);
             doc["metrics"]["trueNegatives"].add(currentModelMetrics->metrics[i].trueNegatives);
             doc["metrics"]["falseNegatives"].add(currentModelMetrics->metrics[i].falseNegatives);
-        }*/
+        }
         auto publish = mqtt.begin_publish(MQTT_SEND_COMMANDS_TOPIC, measureJson(doc));
         serializeJson(doc, publish);
         publish.send();
@@ -1194,8 +1912,10 @@ void sendMessageToNetwork(FederateCommand command) {
         D_println("Send command to resume training...");
 
         doc["command"] = "resume";
-        doc["client"] = CLIENT_NAME;
-        doc["round"] = currentRound;
+        doc["client"] = clientName;
+        doc["round"] = String(clientName) == String(CLIENT_NAME) ? currentRound : -1; // We don't know the other client's round easily here without loading its config fully, assumed -1 or just wait for it to boot.
+        // Actually, if we are just responding for ALIVE, RESUME is probably only for active client.
+        // But if needed for other, we would need to load its config. For now, let's assume this is mostly for active client unless specified.
         auto publishResume = mqtt.begin_publish(MQTT_SEND_COMMANDS_TOPIC, measureJson(doc));
         serializeJson(doc, publishResume);
         publishResume.send();
@@ -1203,9 +1923,17 @@ void sendMessageToNetwork(FederateCommand command) {
     }
     case FederateCommand_ALIVE: {        
         doc["command"] = "alive";
-        doc["client"] = CLIENT_NAME;
-        doc["round"] = currentRound;
-        doc["newModelState"] = modelStateToString(newModelState);
+        doc["client"] = clientName;
+        // If it's the active client, send real state. If other receive "idle" state
+        if (String(clientName) == String(CLIENT_NAME)) {
+            doc["round"] = currentRound;
+            doc["newModelState"] = modelStateToString(newModelState);
+        } else if (otherDeviceConfig != NULL && String(clientName) == String(OTHER_CLIENT_NAME)) {
+            doc["round"] = otherDeviceConfig->currentRound;
+            doc["newModelState"] = modelStateToString(otherDeviceConfig->newModelState);
+        } else {
+            return;
+        }
         auto publishAlive = mqtt.begin_publish(MQTT_SEND_COMMANDS_TOPIC, measureJson(doc));
         serializeJson(doc, publishAlive);
         publishAlive.send();
@@ -1213,6 +1941,19 @@ void sendMessageToNetwork(FederateCommand command) {
     }
     }
     sendingMessage = false;
+}
+
+// Wrapper for default behavior
+void sendMessageToNetwork(FederateCommand command) {
+    sendMessageToNetwork(command, CLIENT_NAME);
+#ifdef DOUBLE_DATASET
+    if (OTHER_CLIENT_NAME != NULL) {
+        // Send ALIVE and JOIN for other client too so it appears in the network
+        if (command == FederateCommand_ALIVE || command == FederateCommand_JOIN) {
+             sendMessageToNetwork(command, OTHER_CLIENT_NAME);
+        }
+    }
+#endif
 }
 
 void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics) {
@@ -1247,6 +1988,10 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
     doc["metrics"]["precision"] = metrics.precision();
     doc["metrics"]["recall"] = metrics.recall();
     doc["metrics"]["f1Score"] = metrics.f1Score();
+    doc["metrics"]["balancedAccuracy"] = metrics.balancedAccuracy();
+    doc["metrics"]["balancedPrecision"] = metrics.balancedPrecision();
+    doc["metrics"]["balancedRecall"] = metrics.balancedRecall();
+    doc["metrics"]["balancedF1Score"] = metrics.balancedF1Score();
     doc["metrics"]["meanSqrdError"] = metrics.meanSqrdError;
     doc["metrics"]["numberOfClasses"] = metrics.numberOfClasses;
     doc["metrics"]["truePositives"] = JsonArray();
@@ -1328,7 +2073,7 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
     char* buffer = new char[1024];
     uint8_t* buff = (uint8_t*)buffer;
     size_t bytesRead = modelFile.readBytes(buffer, 1024);
-    auto publish = mqtt.begin_publish(topic, size);
+    auto publish = mqtt.begin_publish(topic, size, 1);
     while (bytesRead > 0) {
         publish.write(buff, bytesRead);
         bytesRead = modelFile.readBytes(buffer, 1024);
@@ -1337,7 +2082,7 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
     delete[] buffer;
     modelFile.close();
 
-    auto publish2 = mqtt.begin_publish(MQTT_PUBLISH_TOPIC, measureJson(doc));
+    auto publish2 = mqtt.begin_publish(MQTT_PUBLISH_TOPIC, measureJson(doc), 1);
     serializeJson(doc, publish2);
     unsigned long midpoint = millis();
     publish2.send();
@@ -1349,7 +2094,13 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
     printTiming();
     D_println(CLIENT_NAME);
     D_println("Model sent to the network...");
+    delay(1000);
+    delay(1000);
+    delay(1000);
+    delay(1000);
+    delay(1000);
     sendingMessage = false;
+    
 }
 
 DFLOAT* predictFromCurrentModel(DFLOAT* x) {
@@ -1478,17 +2229,55 @@ void processModel() {
         // ! It was throwing kernel panic due to high cpu usage without releasing the core before increasing the WatchDog timer
         if (federateState == FederateState_TRAINING && federateModelConfig != NULL && federateModelConfig->layers != NULL && federateModelConfig->numberOfLayers > 0) {
             #ifdef DATASET_BINARY
-            newModelMetrics = trainModelFromBinaryDataset(*newModel, *federateModelConfig, XY_TRAIN_PATH, METADATA_JSON_PATH);
+            String trainPath;
+            String metaPath;
+            resolveTrainingPaths(trainPath, metaPath);
+            D_println("Round training dataset paths: " + trainPath + " | " + metaPath);
+                        if (isJulianaBinaryDataset(metaPath)) {
+                            newModelMetrics = trainModelFromJulianaBinaryDataset(*newModel, *federateModelConfig, trainPath, metaPath);
+                        } else {
+                            newModelMetrics = trainModelFromBinaryDataset(*newModel, *federateModelConfig, trainPath, metaPath);
+                        }
             #else
+            // TODO: Add support for DOUBLE_DATASET here if needed
             newModelMetrics = trainModelFromOriginalDataset(*newModel, *federateModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
             #endif
         } else {
             #ifdef DATASET_BINARY
-            newModelMetrics = trainModelFromBinaryDataset(*newModel, *localModelConfig, XY_TRAIN_PATH, METADATA_JSON_PATH);
+            String trainPath;
+            String metaPath;
+            resolveTrainingPaths(trainPath, metaPath);
+            D_println("Round training dataset paths: " + trainPath + " | " + metaPath);
+                        if (isJulianaBinaryDataset(metaPath)) {
+                            newModelMetrics = trainModelFromJulianaBinaryDataset(*newModel, *localModelConfig, trainPath, metaPath);
+                        } else {
+                            newModelMetrics = trainModelFromBinaryDataset(*newModel, *localModelConfig, trainPath, metaPath);
+                        }
             #else
+            // TODO: Add support for DOUBLE_DATASET here if needed
             newModelMetrics = trainModelFromOriginalDataset(*newModel, *localModelConfig, X_TRAIN_PATH, Y_TRAIN_PATH);
             #endif
         }
+        // If training failed, newModelMetrics may be NULL. Handle gracefully.
+        if (newModelMetrics == NULL) {
+            D_println("Training did not produce metrics (training failed or metadata missing). Skipping send/compare.");
+            // Cleanup temporary model objects if present
+            if (tempModel != NULL) {
+                delete tempModel;
+                tempModel = NULL;
+            }
+            if (newModel != NULL) {
+                delete newModel;
+                newModel = NULL;
+            }
+            // Set state back to idle to avoid further processing for this round
+            newModelState = ModelState_IDLE;
+            // Ensure we don't attempt to send a NULL metrics object
+            printMemory();
+            roundMemoryUsage.afterTrain = info.total_free_bytes;
+            return;
+        }
+
         if (tempModel != NULL) {
             newModelMetrics->parsingTime = tempModel->parsingTime;
         }
@@ -1496,10 +2285,12 @@ void processModel() {
         printMemory();
         roundMemoryUsage.afterTrain = info.total_free_bytes;
         if (federateState == FederateState_TRAINING) {
-            sendModelToNetwork(*newModel, *newModelMetrics);
             if (newModelMetrics != NULL) {
+                sendModelToNetwork(*newModel, *newModelMetrics);
                 delete newModelMetrics;
                 newModelMetrics = NULL;
+            } else {
+                D_println("New model metrics NULL, skipping sendModelToNetwork for newModel.");
             }
             if (newModel != NULL) {
                 delete newModel;
@@ -1510,10 +2301,16 @@ void processModel() {
                 tempModel = NULL;
             }
             newModelState = ModelState_IDLE;
+            #ifdef DOUBLE_DATASET
+            lastTrainedRound = currentRound;
+            saveDeviceConfig(); // Save state before switching context
+            switchDatasetIndex();
+            ESP.restart();
+            #endif
         }
     }
     if (newModelState == ModelState_DONE_TRAINING && currentModel != NULL) {
-        if (compareMetrics(currentModelMetrics, newModelMetrics)) {
+        if (newModelMetrics != NULL && compareMetrics(currentModelMetrics, newModelMetrics)) {
             delete currentModel;
             currentModel = newModel;
             newModel = NULL;
@@ -1543,10 +2340,17 @@ void processModel() {
 }
 
 bool loadDeviceDefinitions() {
-    if (!LittleFS.exists(DEVICE_DEFINITION_PATH)) {
+    String devicePath = DEVICE_DEFINITION_PATH;
+#ifdef DOUBLE_DATASET
+    if (datasetIndex == 1) {
+        devicePath = DEVICE_DEFINITION_PATH_2;
+    }
+#endif
+
+    if (!LittleFS.exists(devicePath)) {
         return false;
     }
-    File definitionsFile = LittleFS.open(DEVICE_DEFINITION_PATH, "r");
+    File definitionsFile = LittleFS.open(devicePath, "r");
     if (!definitionsFile) {
         return false;
     }
@@ -1567,16 +2371,49 @@ bool loadDeviceDefinitions() {
     CLIENT_NAME = new char[strlen(clientValue) + 1];
     strcpy(CLIENT_NAME, clientValue);
 
+#ifdef DOUBLE_DATASET
+    // Load the OTHER client name too
+    String otherDevicePath = DEVICE_DEFINITION_PATH;
+    if (datasetIndex == 0) {
+        otherDevicePath = DEVICE_DEFINITION_PATH_2;
+    }
+    // If it exists, read it
+    if (LittleFS.exists(otherDevicePath)) {
+        File f2 = LittleFS.open(otherDevicePath, "r");
+        if (f2) {
+            JsonDocument doc2;
+            DeserializationError err2 = deserializeJson(doc2, f2);
+            f2.close();
+            if (!err2) {
+                const char* otherClientValue = doc2["client"] | "";
+                if (strlen(otherClientValue) > 0) {
+                    if (OTHER_CLIENT_NAME != nullptr) delete[] OTHER_CLIENT_NAME;
+                    OTHER_CLIENT_NAME = new char[strlen(otherClientValue) + 1];
+                    strcpy(OTHER_CLIENT_NAME, otherClientValue);
+                    D_println("Other client name: " + String(OTHER_CLIENT_NAME));
+                }
+            }
+        }
+    }
+#endif
+
     return true;
 }
 
 bool loadDeviceConfig() {
     D_println("Loading configuration...");
-    if (!LittleFS.exists(CONFIGURATION_PATH)) {
+    String configPath = CONFIGURATION_PATH;
+#ifdef DOUBLE_DATASET
+    if (datasetIndex == 1) {
+        configPath = CONFIGURATION_PATH_2;
+    }
+#endif
+
+    if (!LittleFS.exists(configPath)) {
         return false;
     }
 
-    File configFile = LittleFS.open(CONFIGURATION_PATH, "r");
+    File configFile = LittleFS.open(configPath, "r");
     if (!configFile) {
         return false;
     }
@@ -1592,6 +2429,7 @@ bool loadDeviceConfig() {
     }
     deviceConfig = new DeviceConfig;
     deviceConfig->currentRound = doc["currentRound"] | -1;
+    deviceConfig->lastTrainedRound = doc["lastTrainedRound"] | -1;
     deviceConfig->currentFederateState = static_cast<FederateState>(doc["federateState"] | FederateState_NONE);
     deviceConfig->newModelState = static_cast<ModelState>(doc["modelState"] | ModelState_IDLE);
 
@@ -1621,8 +2459,23 @@ bool loadDeviceConfig() {
         deviceConfig->loadedFederateModelConfig = new ModelConfig(layers, federateModelConfigObj["layers"].size(), actvFunctions, 
                                                             federateModelConfigObj["learningRateOfWeights"].as<IDFLOAT>(), 
                                                             federateModelConfigObj["learningRateOfBiases"].as<IDFLOAT>());
-        deviceConfig->loadedFederateModelConfig->numberOfLayers = federateModelConfigObj["numberOfLayers"] | federateModelConfigObj["layers"].size() - 1;
+        deviceConfig->loadedFederateModelConfig->numberOfLayers = federateModelConfigObj["numberOfLayers"] | federateModelConfigObj["layers"].size();
         deviceConfig->loadedFederateModelConfig->epochs = federateModelConfigObj["epochs"] | 1;
+    }
+    if (doc["datasetKey"].is<const char*>()) {
+        selectedDatasetKey = sanitizeDatasetKey(String(doc["datasetKey"].as<const char*>()));
+    } else {
+        selectedDatasetKey = "";
+    }
+    if (doc["datasetBin"].is<const char*>()) {
+        selectedDatasetBinName = baseNameFromPath(String(doc["datasetBin"].as<const char*>()));
+    } else {
+        selectedDatasetBinName = "";
+    }
+    if (doc["datasetMeta"].is<const char*>()) {
+        selectedDatasetMetaName = baseNameFromPath(String(doc["datasetMeta"].as<const char*>()));
+    } else {
+        selectedDatasetMetaName = "";
     }
 
     if (false) {
@@ -1650,11 +2503,72 @@ bool loadDeviceConfig() {
     return true;
 }
 
+bool loadOtherDeviceConfig() {
+    D_println("Loading other configuration...");
+    String configPath = CONFIGURATION_PATH;
+#ifdef DOUBLE_DATASET
+    if (datasetIndex == 0) {
+        configPath = CONFIGURATION_PATH_2;
+    }
+#else
+    return false;
+#endif
+
+    if (!LittleFS.exists(configPath)) {
+        return false;
+    }
+
+    File configFile = LittleFS.open(configPath, "r");
+    if (!configFile) {
+        return false;
+    }
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, configFile);
+    configFile.close();
+    if (error) {
+        return false;
+    }
+    if (otherDeviceConfig != nullptr) {
+        delete otherDeviceConfig;
+    }
+    otherDeviceConfig = new DeviceConfig;
+    otherDeviceConfig->currentRound = doc["currentRound"] | -1;
+    otherDeviceConfig->currentFederateState = static_cast<FederateState>(doc["federateState"] | FederateState_NONE);
+    otherDeviceConfig->newModelState = static_cast<ModelState>(doc["modelState"] | ModelState_IDLE);
+
+    if (doc["metrics"].is<JsonObject>()) {
+        otherDeviceConfig->currentModelMetrics = new multiClassClassifierMetrics;
+        otherDeviceConfig->currentModelMetrics->numberOfClasses = doc["metrics"]["numberOfClasses"] | 0;
+        otherDeviceConfig->currentModelMetrics->epochs = doc["metrics"]["epochs"] | 0;
+        otherDeviceConfig->currentModelMetrics->meanSqrdError = doc["metrics"]["meanSqrdError"] | 0;
+        otherDeviceConfig->currentModelMetrics->trainingTime = doc["timings"]["training"] | 0;
+        otherDeviceConfig->currentModelMetrics->parsingTime = doc["timings"]["parsing"] | 0;
+        otherDeviceConfig->currentModelMetrics->metrics = new classClassifierMetricts[otherDeviceConfig->currentModelMetrics->numberOfClasses];
+        for (int i = 0; i < otherDeviceConfig->currentModelMetrics->numberOfClasses; i++) {
+            otherDeviceConfig->currentModelMetrics->metrics[i].truePositives = doc["metrics"]["truePositives"][i] | 0;
+            otherDeviceConfig->currentModelMetrics->metrics[i].falsePositives = doc["metrics"]["falsePositives"][i] | 0;
+            otherDeviceConfig->currentModelMetrics->metrics[i].trueNegatives = doc["metrics"]["trueNegatives"][i] | 0;
+            otherDeviceConfig->currentModelMetrics->metrics[i].falseNegatives = doc["metrics"]["falseNegatives"][i] | 0;
+        }
+    }
+
+    D_println("Other configuration loaded successfully");
+    return true;
+}
+
 bool saveDeviceConfig() {
-    File configFile = LittleFS.open(CONFIGURATION_PATH, "w");
+    String configPath = CONFIGURATION_PATH;
+#ifdef DOUBLE_DATASET
+    if (datasetIndex == 1) {
+        configPath = CONFIGURATION_PATH_2;
+    }
+#endif
+
+    File configFile = LittleFS.open(configPath, "w");
     if (!configFile) return false;
     JsonDocument doc;
     
+    doc["lastTrainedRound"] = lastTrainedRound;
     doc["currentRound"] = currentRound;
     doc["federateState"] = federateState;
     doc["modelState"] = newModelState;
@@ -1684,6 +2598,15 @@ bool saveDeviceConfig() {
         doc["federateModelConfig"]["learningRateOfBiases"] = federateModelConfig->learningRateOfBiases;
         doc["federateModelConfig"]["numberOfLayers"] = federateModelConfig->numberOfLayers;
         doc["federateModelConfig"]["epochs"] = federateModelConfig->epochs;
+    }
+    if (selectedDatasetKey.length() > 0) {
+        doc["datasetKey"] = selectedDatasetKey;
+    }
+    if (selectedDatasetBinName.length() > 0) {
+        doc["datasetBin"] = selectedDatasetBinName;
+    }
+    if (selectedDatasetMetaName.length() > 0) {
+        doc["datasetMeta"] = selectedDatasetMetaName;
     }
 
     bool result = serializeJson(doc, configFile) > 0;

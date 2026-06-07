@@ -284,6 +284,7 @@ struct ModelConfig {
 
 struct DeviceConfig {
     int currentRound = -1;
+    int lastTrainedRound = -1;
     FederateState currentFederateState = FederateState_NONE;
     ModelState newModelState = ModelState_IDLE;
     multiClassClassifierMetrics* currentModelMetrics = nullptr;
@@ -323,18 +324,29 @@ char* CLIENT_NAME;
 
 void bootUp(bool initBaseModel = true);
 
+void setupFederatedModel();
+
 bool saveModelToFlash(NeuralNetwork& NN, const String file);
 
 NeuralNetwork* loadModelFromFlash(const String& file);
 
 model* transformDataToModel(Stream& stream);
 
+#ifdef DATASET_ORIGINAL
 multiClassClassifierMetrics* trainModelFromOriginalDataset(NeuralNetwork& NN, ModelConfig& config, const String& x_file, const String& y_file);
+#endif
+
+#ifdef DATASET_BINARY
+bool isJulianaBinaryDataset(const String& meta_file);
 // Train directly from binary dataset using metadata.json schema (no CSV, streaming)
 multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, ModelConfig& config, const String& bin_file, const String& meta_file);
+multiClassClassifierMetrics* trainModelFromJulianaBinaryDataset(NeuralNetwork& NN, ModelConfig& config, const String& bin_file, const String& meta_file);
+#endif
 
 void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics);
 
+void sendMessageToNetwork(FederateCommand command, const char* clientName);
+// Default overload
 void sendMessageToNetwork(FederateCommand command);
 
 void processMessages();
