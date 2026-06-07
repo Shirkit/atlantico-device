@@ -1,0 +1,457 @@
+{
+  "schema": [
+    {
+      "name": "activityID",
+      "type": "int8",
+      "c_type": "int8_t",
+      "bytes": 1,
+      "offset": 0
+    },
+    {
+      "name": "heart_rate",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 1
+    },
+    {
+      "name": "hand_temp",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 5
+    },
+    {
+      "name": "hand_acc16_x",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 9
+    },
+    {
+      "name": "hand_acc16_y",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 13
+    },
+    {
+      "name": "hand_acc16_z",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 17
+    },
+    {
+      "name": "hand_gyro_x",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 21
+    },
+    {
+      "name": "hand_gyro_y",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 25
+    },
+    {
+      "name": "hand_gyro_z",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 29
+    },
+    {
+      "name": "hand_mag_x",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 33
+    },
+    {
+      "name": "hand_mag_y",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 37
+    },
+    {
+      "name": "hand_mag_z",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 41
+    },
+    {
+      "name": "chest_temp",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 45
+    },
+    {
+      "name": "chest_acc16_x",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 49
+    },
+    {
+      "name": "chest_acc16_y",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 53
+    },
+    {
+      "name": "chest_acc16_z",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 57
+    },
+    {
+      "name": "chest_gyro_x",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 61
+    },
+    {
+      "name": "chest_gyro_y",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 65
+    },
+    {
+      "name": "chest_gyro_z",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 69
+    },
+    {
+      "name": "chest_mag_x",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 73
+    },
+    {
+      "name": "chest_mag_y",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 77
+    },
+    {
+      "name": "chest_mag_z",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 81
+    },
+    {
+      "name": "ankle_temp",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 85
+    },
+    {
+      "name": "ankle_acc16_x",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 89
+    },
+    {
+      "name": "ankle_acc16_y",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 93
+    },
+    {
+      "name": "ankle_acc16_z",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 97
+    },
+    {
+      "name": "ankle_gyro_x",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 101
+    },
+    {
+      "name": "ankle_gyro_y",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 105
+    },
+    {
+      "name": "ankle_gyro_z",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 109
+    },
+    {
+      "name": "ankle_mag_x",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 113
+    },
+    {
+      "name": "ankle_mag_y",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 117
+    },
+    {
+      "name": "ankle_mag_z",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 121
+    }
+  ],
+  "files": [
+    {
+      "subject": 101,
+      "tag": "protocol",
+      "filename": "subject101_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 101,
+      "tag": "optional",
+      "filename": "subject101_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 101,
+      "tag": "merge",
+      "filename": "subject101_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 102,
+      "tag": "protocol",
+      "filename": "subject102_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 102,
+      "tag": "merge",
+      "filename": "subject102_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 103,
+      "tag": "protocol",
+      "filename": "subject103_processed.bin",
+      "rows": 15932,
+      "bytes_per_row": 125,
+      "total_bytes": 1991500
+    },
+    {
+      "subject": 103,
+      "tag": "merge",
+      "filename": "subject103_processed.bin",
+      "rows": 15932,
+      "bytes_per_row": 125,
+      "total_bytes": 1991500
+    },
+    {
+      "subject": 104,
+      "tag": "protocol",
+      "filename": "subject104_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 104,
+      "tag": "merge",
+      "filename": "subject104_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 105,
+      "tag": "protocol",
+      "filename": "subject105_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 105,
+      "tag": "optional",
+      "filename": "subject105_processed.bin",
+      "rows": 12743,
+      "bytes_per_row": 125,
+      "total_bytes": 1592875
+    },
+    {
+      "subject": 105,
+      "tag": "merge",
+      "filename": "subject105_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 106,
+      "tag": "protocol",
+      "filename": "subject106_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 106,
+      "tag": "optional",
+      "filename": "subject106_processed.bin",
+      "rows": 10247,
+      "bytes_per_row": 125,
+      "total_bytes": 1280875
+    },
+    {
+      "subject": 106,
+      "tag": "merge",
+      "filename": "subject106_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 107,
+      "tag": "protocol",
+      "filename": "subject107_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 107,
+      "tag": "merge",
+      "filename": "subject107_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 108,
+      "tag": "protocol",
+      "filename": "subject108_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 108,
+      "tag": "optional",
+      "filename": "subject108_processed.bin",
+      "rows": 13886,
+      "bytes_per_row": 125,
+      "total_bytes": 1735750
+    },
+    {
+      "subject": 108,
+      "tag": "merge",
+      "filename": "subject108_processed.bin",
+      "rows": 20000,
+      "bytes_per_row": 125,
+      "total_bytes": 2500000
+    },
+    {
+      "subject": 109,
+      "tag": "protocol",
+      "filename": "subject109_processed.bin",
+      "rows": 585,
+      "bytes_per_row": 125,
+      "total_bytes": 73125
+    },
+    {
+      "subject": 109,
+      "tag": "optional",
+      "filename": "subject109_processed.bin",
+      "rows": 14489,
+      "bytes_per_row": 125,
+      "total_bytes": 1811125
+    },
+    {
+      "subject": 109,
+      "tag": "merge",
+      "filename": "subject109_processed.bin",
+      "rows": 15074,
+      "bytes_per_row": 125,
+      "total_bytes": 1884250
+    }
+  ],
+  "bytes_per_row": 125,
+  "label_column": "activityID",
+  "label_values": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    9,
+    10,
+    11,
+    12,
+    13,
+    16,
+    17,
+    18,
+    19,
+    20,
+    24
+  ],
+  "label_map": {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "9": 8,
+    "10": 9,
+    "11": 10,
+    "12": 11,
+    "13": 12,
+    "16": 13,
+    "17": 14,
+    "18": 15,
+    "19": 16,
+    "20": 17,
+    "24": 18
+  },
+  "input_size": 31
+}

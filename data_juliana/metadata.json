@@ -1,0 +1,582 @@
+{
+  "label_column": "ocupada",
+  "schema": [
+    {
+      "name": "current_time",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 0
+    },
+    {
+      "name": "current_day_of_week",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 4
+    },
+    {
+      "name": "average_gas",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 8
+    },
+    {
+      "name": "average_light",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 12
+    },
+    {
+      "name": "average_loudness",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 16
+    },
+    {
+      "name": "average_temperature",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 20
+    },
+    {
+      "name": "average_humidity",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 24
+    },
+    {
+      "name": "average_object",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 28
+    },
+    {
+      "name": "average_ambient",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 32
+    },
+    {
+      "name": "average_distance",
+      "type": "float32",
+      "c_type": "float",
+      "bytes": 4,
+      "offset": 36
+    },
+    {
+      "name": "ocupada",
+      "type": "uint8",
+      "c_type": "uint8_t",
+      "bytes": 1,
+      "offset": 40
+    }
+  ],
+  "bytes_per_row": 41,
+  "input_dir": "/home/shirkit/Projects/atlantico-processing/data_juliana",
+  "combined_csv": "combined_raw.csv",
+  "normalized_csv": "combined_normalized.csv",
+  "feature_columns": [
+    "average_gas",
+    "average_light",
+    "average_loudness",
+    "average_temperature",
+    "average_humidity",
+    "average_object",
+    "average_ambient",
+    "average_distance",
+    "current_time",
+    "current_day_of_week"
+  ],
+  "normalization": {
+    "average_gas": {
+      "min": 0.0,
+      "max": 481.25
+    },
+    "average_light": {
+      "min": 48.7,
+      "max": 299.85
+    },
+    "average_loudness": {
+      "min": 0.0,
+      "max": 11.75
+    },
+    "average_temperature": {
+      "min": 0.0,
+      "max": 32.0
+    },
+    "average_humidity": {
+      "min": 0.0,
+      "max": 95.0
+    },
+    "average_object": {
+      "min": 0.0,
+      "max": 30.85555555555557
+    },
+    "average_ambient": {
+      "min": 0.0,
+      "max": 33.218421052631605
+    },
+    "average_distance": {
+      "min": 0.0,
+      "max": 14.016957118593414
+    },
+    "current_time": {
+      "min": 0.0,
+      "max": 85800.0
+    },
+    "current_day_of_week": {
+      "min": 0.0,
+      "max": 6.0
+    }
+  },
+  "rows": 4883,
+  "source_files": [
+    "week_2025_51.csv",
+    "week_2026_01.csv",
+    "week_2026_02.csv",
+    "week_2026_03.csv",
+    "week_2026_04.csv",
+    "week_2026_05.csv",
+    "week_2026_06.csv",
+    "week_2026_07.csv",
+    "week_2026_09.csv",
+    "week_2026_10.csv",
+    "week_2026_11.csv",
+    "week_2026_13.csv",
+    "week_2026_14.csv",
+    "week_2026_15.csv",
+    "week_2026_19.csv"
+  ],
+  "seed": 42,
+  "binary": {
+    "filename": "combined_normalized.bin",
+    "rows": 4883,
+    "bytes_per_row": 41,
+    "schema": [
+      {
+        "name": "current_time",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 0
+      },
+      {
+        "name": "current_day_of_week",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 4
+      },
+      {
+        "name": "average_gas",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 8
+      },
+      {
+        "name": "average_light",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 12
+      },
+      {
+        "name": "average_loudness",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 16
+      },
+      {
+        "name": "average_temperature",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 20
+      },
+      {
+        "name": "average_humidity",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 24
+      },
+      {
+        "name": "average_object",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 28
+      },
+      {
+        "name": "average_ambient",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 32
+      },
+      {
+        "name": "average_distance",
+        "type": "float32",
+        "c_type": "float",
+        "bytes": 4,
+        "offset": 36
+      },
+      {
+        "name": "ocupada",
+        "type": "uint8",
+        "c_type": "uint8_t",
+        "bytes": 1,
+        "offset": 40
+      }
+    ]
+  },
+  "shards": [
+    {
+      "shard_count": 5,
+      "directory": "shards_5",
+      "shards": [
+        {
+          "shard": 1,
+          "rows": 977,
+          "csv": "shards_5-5_01.csv",
+          "bin": "shards_5-5_01.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 889,
+            "1": 88
+          }
+        },
+        {
+          "shard": 2,
+          "rows": 977,
+          "csv": "shards_5-5_02.csv",
+          "bin": "shards_5-5_02.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 889,
+            "1": 88
+          }
+        },
+        {
+          "shard": 3,
+          "rows": 977,
+          "csv": "shards_5-5_03.csv",
+          "bin": "shards_5-5_03.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 889,
+            "1": 88
+          }
+        },
+        {
+          "shard": 4,
+          "rows": 976,
+          "csv": "shards_5-5_04.csv",
+          "bin": "shards_5-5_04.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 889,
+            "1": 87
+          }
+        },
+        {
+          "shard": 5,
+          "rows": 976,
+          "csv": "shards_5-5_05.csv",
+          "bin": "shards_5-5_05.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 889,
+            "1": 87
+          }
+        }
+      ],
+      "schema": [
+        {
+          "name": "current_time",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 0
+        },
+        {
+          "name": "current_day_of_week",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 4
+        },
+        {
+          "name": "average_gas",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 8
+        },
+        {
+          "name": "average_light",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 12
+        },
+        {
+          "name": "average_loudness",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 16
+        },
+        {
+          "name": "average_temperature",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 20
+        },
+        {
+          "name": "average_humidity",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 24
+        },
+        {
+          "name": "average_object",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 28
+        },
+        {
+          "name": "average_ambient",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 32
+        },
+        {
+          "name": "average_distance",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 36
+        },
+        {
+          "name": "ocupada",
+          "type": "uint8",
+          "c_type": "uint8_t",
+          "bytes": 1,
+          "offset": 40
+        }
+      ],
+      "bytes_per_row": 41
+    },
+    {
+      "shard_count": 10,
+      "directory": "shards_10",
+      "shards": [
+        {
+          "shard": 1,
+          "rows": 489,
+          "csv": "shards_10_01.csv",
+          "bin": "shards_10_01.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 445,
+            "1": 44
+          }
+        },
+        {
+          "shard": 2,
+          "rows": 489,
+          "csv": "shards_10_02.csv",
+          "bin": "shards_10_02.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 445,
+            "1": 44
+          }
+        },
+        {
+          "shard": 3,
+          "rows": 489,
+          "csv": "shards_10_03.csv",
+          "bin": "shards_10_03.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 445,
+            "1": 44
+          }
+        },
+        {
+          "shard": 4,
+          "rows": 489,
+          "csv": "shards_10_04.csv",
+          "bin": "shards_10_04.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 445,
+            "1": 44
+          }
+        },
+        {
+          "shard": 5,
+          "rows": 489,
+          "csv": "shards_10_05.csv",
+          "bin": "shards_10_05.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 445,
+            "1": 44
+          }
+        },
+        {
+          "shard": 6,
+          "rows": 488,
+          "csv": "shards_10_06.csv",
+          "bin": "shards_10_06.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 444,
+            "1": 44
+          }
+        },
+        {
+          "shard": 7,
+          "rows": 488,
+          "csv": "shards_10_07.csv",
+          "bin": "shards_10_07.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 444,
+            "1": 44
+          }
+        },
+        {
+          "shard": 8,
+          "rows": 488,
+          "csv": "shards_10_08.csv",
+          "bin": "shards_10_08.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 444,
+            "1": 44
+          }
+        },
+        {
+          "shard": 9,
+          "rows": 487,
+          "csv": "shards_10_09.csv",
+          "bin": "shards_10_09.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 444,
+            "1": 43
+          }
+        },
+        {
+          "shard": 10,
+          "rows": 487,
+          "csv": "shards_10_10.csv",
+          "bin": "shards_10_10.bin",
+          "bytes_per_row": 41,
+          "label_counts": {
+            "0": 444,
+            "1": 43
+          }
+        }
+      ],
+      "schema": [
+        {
+          "name": "current_time",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 0
+        },
+        {
+          "name": "current_day_of_week",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 4
+        },
+        {
+          "name": "average_gas",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 8
+        },
+        {
+          "name": "average_light",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 12
+        },
+        {
+          "name": "average_loudness",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 16
+        },
+        {
+          "name": "average_temperature",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 20
+        },
+        {
+          "name": "average_humidity",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 24
+        },
+        {
+          "name": "average_object",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 28
+        },
+        {
+          "name": "average_ambient",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 32
+        },
+        {
+          "name": "average_distance",
+          "type": "float32",
+          "c_type": "float",
+          "bytes": 4,
+          "offset": 36
+        },
+        {
+          "name": "ocupada",
+          "type": "uint8",
+          "c_type": "uint8_t",
+          "bytes": 1,
+          "offset": 40
+        }
+      ],
+      "bytes_per_row": 41
+    }
+  ]
+}
