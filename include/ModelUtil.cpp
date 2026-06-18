@@ -1882,26 +1882,40 @@ void sendMessageToNetwork(FederateCommand command, const char* clientName) {
         doc["command"] = "join";
         doc["client"] = clientName;
         doc["metrics"] = JsonObject();
-        doc["metrics"]["accuracy"] = currentModelMetrics->accuracy();
-        doc["metrics"]["precision"] = currentModelMetrics->precision();
-        doc["metrics"]["recall"] = currentModelMetrics->recall();
-        doc["metrics"]["f1Score"] = currentModelMetrics->f1Score();
-        doc["metrics"]["balancedAccuracy"] = currentModelMetrics->balancedAccuracy();
-        doc["metrics"]["balancedPrecision"] = currentModelMetrics->balancedPrecision();
-        doc["metrics"]["balancedRecall"] = currentModelMetrics->balancedRecall();
-        doc["metrics"]["balancedF1Score"] = currentModelMetrics->balancedF1Score();
-        doc["metrics"]["meanSqrdError"] = currentModelMetrics->meanSqrdError;
-        doc["metrics"]["numberOfClasses"] = currentModelMetrics->numberOfClasses;
-        doc["metrics"]["truePositives"] = JsonArray();
-        doc["metrics"]["falsePositives"] = JsonArray();
-        doc["metrics"]["trueNegatives"] = JsonArray();
-        doc["metrics"]["falseNegatives"] = JsonArray();
-        for (int i = 0; i < currentModelMetrics->numberOfClasses; i++) {
-            doc["metrics"]["truePositives"].add(currentModelMetrics->metrics[i].truePositives);
-            doc["metrics"]["falsePositives"].add(currentModelMetrics->metrics[i].falsePositives);
-            doc["metrics"]["trueNegatives"].add(currentModelMetrics->metrics[i].trueNegatives);
-            doc["metrics"]["falseNegatives"].add(currentModelMetrics->metrics[i].falseNegatives);
+        if (currentModelMetrics != NULL) {
+            doc["metrics"]["accuracy"] = currentModelMetrics->accuracy();
+            doc["metrics"]["precision"] = currentModelMetrics->precision();
+            doc["metrics"]["recall"] = currentModelMetrics->recall();
+            doc["metrics"]["f1Score"] = currentModelMetrics->f1Score();
+            doc["metrics"]["balancedAccuracy"] = currentModelMetrics->balancedAccuracy();
+            doc["metrics"]["balancedPrecision"] = currentModelMetrics->balancedPrecision();
+            doc["metrics"]["balancedRecall"] = currentModelMetrics->balancedRecall();
+            doc["metrics"]["balancedF1Score"] = currentModelMetrics->balancedF1Score();
+            doc["metrics"]["meanSqrdError"] = currentModelMetrics->meanSqrdError;
+            doc["metrics"]["numberOfClasses"] = currentModelMetrics->numberOfClasses;
+            doc["metrics"]["truePositives"] = JsonArray();
+            doc["metrics"]["falsePositives"] = JsonArray();
+            doc["metrics"]["trueNegatives"] = JsonArray();
+            doc["metrics"]["falseNegatives"] = JsonArray();
+            for (int i = 0; i < currentModelMetrics->numberOfClasses; i++) {
+                doc["metrics"]["truePositives"].add(currentModelMetrics->metrics[i].truePositives);
+                doc["metrics"]["falsePositives"].add(currentModelMetrics->metrics[i].falsePositives);
+                doc["metrics"]["trueNegatives"].add(currentModelMetrics->metrics[i].trueNegatives);
+                doc["metrics"]["falseNegatives"].add(currentModelMetrics->metrics[i].falseNegatives);
+            }
+        } else {
+            doc["metrics"]["accuracy"] = 0;
+            doc["metrics"]["precision"] = 0;
+            doc["metrics"]["recall"] = 0;
+            doc["metrics"]["f1Score"] = 0;
+            doc["metrics"]["balancedAccuracy"] = 0;
+            doc["metrics"]["balancedPrecision"] = 0;
+            doc["metrics"]["balancedRecall"] = 0;
+            doc["metrics"]["balancedF1Score"] = 0;
+            doc["metrics"]["meanSqrdError"] = 0;
+            doc["metrics"]["numberOfClasses"] = 0;
         }
+
         auto publish = mqtt.begin_publish(MQTT_SEND_COMMANDS_TOPIC, measureJson(doc));
         serializeJson(doc, publish);
         publish.send();

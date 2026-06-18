@@ -104,6 +104,7 @@ struct multiClassClassifierMetrics {
     unsigned long epochs = 0;
 
     DFLOAT totalPredictions() {
+        if (metrics == NULL || numberOfClasses == 0) return 0;
         DFLOAT sum = 0;
         for (unsigned int i = 0; i < numberOfClasses; i++) {
             sum += metrics[i].truePositives + metrics[i].falseNegatives;
@@ -112,6 +113,7 @@ struct multiClassClassifierMetrics {
     }
 
     DFLOAT accuracy() {
+        if (metrics == NULL || numberOfClasses == 0) return 0;
         DFLOAT sum = 0;
         for (unsigned int i = 0; i < numberOfClasses; i++) {
             sum += metrics[i].accuracy();
@@ -120,6 +122,7 @@ struct multiClassClassifierMetrics {
     }
 
     DFLOAT precision() {
+        if (metrics == NULL || numberOfClasses == 0) return 0;
         DFLOAT sum = 0;
         for (unsigned int i = 0; i < numberOfClasses; i++) {
             sum += metrics[i].precision();
@@ -128,6 +131,7 @@ struct multiClassClassifierMetrics {
     }
 
     DFLOAT recall() {
+        if (metrics == NULL || numberOfClasses == 0) return 0;
         DFLOAT sum = 0;
         for (unsigned int i = 0; i < numberOfClasses; i++) {
             sum += metrics[i].recall();
@@ -136,6 +140,7 @@ struct multiClassClassifierMetrics {
     }
 
     DFLOAT f1Score() {
+        if (metrics == NULL || numberOfClasses == 0) return 0;
         DFLOAT sum = 0;
         for (unsigned int i = 0; i < numberOfClasses; i++) {
             sum += metrics[i].f1Score();
@@ -144,33 +149,45 @@ struct multiClassClassifierMetrics {
     }
 
     DFLOAT balancedAccuracy() {
+        if (metrics == NULL || numberOfClasses == 0) return 0;
         DFLOAT sum = 0;
+        DFLOAT total = totalPredictions();
+        if (total == 0) return 0;
         for (unsigned int i = 0; i < numberOfClasses; i++) {
-            sum += metrics[i].accuracy() * (metrics[i].totalPredictions() / totalPredictions());
+            sum += metrics[i].accuracy() * (metrics[i].totalPredictions() / total);
         }
         return sum;
     }
 
     DFLOAT balancedPrecision() {
+        if (metrics == NULL || numberOfClasses == 0) return 0;
         DFLOAT sum = 0;
+        DFLOAT total = totalPredictions();
+        if (total == 0) return 0;
         for (unsigned int i = 0; i < numberOfClasses; i++) {
-            sum += metrics[i].precision() * (metrics[i].totalPredictions() / totalPredictions());
+            sum += metrics[i].precision() * (metrics[i].totalPredictions() / total);
         }
         return sum;
     }
 
     DFLOAT balancedRecall() {
+        if (metrics == NULL || numberOfClasses == 0) return 0;
         DFLOAT sum = 0;
+        DFLOAT total = totalPredictions();
+        if (total == 0) return 0;
         for (unsigned int i = 0; i < numberOfClasses; i++) {
-            sum += metrics[i].recall() * (metrics[i].totalPredictions() / totalPredictions());
+            sum += metrics[i].recall() * (metrics[i].totalPredictions() / total);
         }
         return sum;
     }
 
     DFLOAT balancedF1Score() {
+        if (metrics == NULL || numberOfClasses == 0) return 0;
         DFLOAT sum = 0;
+        DFLOAT total = totalPredictions();
+        if (total == 0) return 0;
         for (unsigned int i = 0; i < numberOfClasses; i++) {
-            sum += metrics[i].f1Score() * (metrics[i].totalPredictions() / (float) totalPredictions());
+            sum += metrics[i].f1Score() * (metrics[i].totalPredictions() / total);
         }
         return sum;
     }

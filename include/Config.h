@@ -4,7 +4,7 @@
 // Network / Broker
 #define WIFI_SSID "Interclub.PedroRapha"
 #define WIFI_PASSWORD "456123789a"
-#define MQTT_BROKER "192.168.10.13"
+#define MQTT_BROKER "192.168.10.16"
 
 // Wi-Fi addressing mode
 // 1 => DHCP (automatic IP)
