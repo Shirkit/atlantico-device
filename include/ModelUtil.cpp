@@ -337,6 +337,9 @@ void bootUp(bool initBaseModel) {
             } else {
                  newModelState = deviceConfig->newModelState;
             }
+        } else {
+            // Even if config has no active session in flash, query server for resume in case flash write failed
+            resumeTraining = true;
         }
     } else {
         // If config couldn't be loaded (e.g. flash bypassed/corrupted),
