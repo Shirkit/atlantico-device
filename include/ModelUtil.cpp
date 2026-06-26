@@ -293,6 +293,9 @@ void bootUp(bool initBaseModel) {
         return;
     }
 
+    D_println("LittleFS Total Space: " + String(LittleFS.totalBytes()) + " bytes");
+    D_println("LittleFS Used Space: " + String(LittleFS.usedBytes()) + " bytes");
+
 #ifdef DOUBLE_DATASET
     loadDatasetIndex();
 #endif
@@ -335,6 +338,10 @@ void bootUp(bool initBaseModel) {
                  newModelState = deviceConfig->newModelState;
             }
         }
+    } else {
+        // If config couldn't be loaded (e.g. flash bypassed/corrupted),
+        // default to requesting a resume check from the server on boot
+        resumeTraining = true;
     }
 
     printMemory();
@@ -1237,13 +1244,40 @@ void setupResume() {
         }
         newModelState = ModelState_MODEL_BUSY;
 
+#if DIRECT_MQTT_STREAMING
+        if (tempModel != NULL) {
+            delete tempModel;
+        }
+        if (newModel != NULL) {
+            delete newModel;
+        }
+
+        if (federateModelConfig != NULL) {
+            newModel = new NeuralNetwork(federateModelConfig->layers, federateModelConfig->numberOfLayers, federateModelConfig->actvFunctions);
+            newModel->LearningRateOfBiases = federateModelConfig->learningRateOfBiases;
+            newModel->LearningRateOfWeights = federateModelConfig->learningRateOfWeights;
+        } else {
+            newModel = new NeuralNetwork(localModelConfig->layers, localModelConfig->numberOfLayers, localModelConfig->actvFunctions);
+            newModel->LearningRateOfBiases = localModelConfig->learningRateOfBiases;
+            newModel->LearningRateOfWeights = localModelConfig->learningRateOfWeights;
+        }
+
+        bool loaded = loadModelFromStreamDirectly(newModel, stream);
+#else
         File file = LittleFS.open(TEMPORARY_NEW_MODEL_PATH, "w+");
         if (!file) {
             D_println("Error opening file for writing");
             return;
         }
+        
+        uint8_t buffer[1024];
         while (stream.available()) {
-            file.write(stream.read());
+            // readBytes returns the actual number of bytes read
+            size_t bytesRead = stream.readBytes(buffer, sizeof(buffer));
+            if (bytesRead > 0) {
+                // Only write exactly the amount of bytes that were successfully read
+                file.write(buffer, bytesRead);
+            }
         }
         file.seek(0);
 
@@ -1254,11 +1288,21 @@ void setupResume() {
             delete newModel;
         }
 
-        newModel = new NeuralNetwork(localModelConfig->layers, localModelConfig->numberOfLayers, localModelConfig->actvFunctions);
-        newModel->LearningRateOfBiases = localModelConfig->learningRateOfBiases;
-        newModel->LearningRateOfWeights = localModelConfig->learningRateOfWeights;
+        if (federateModelConfig != NULL) {
+            newModel = new NeuralNetwork(federateModelConfig->layers, federateModelConfig->numberOfLayers, federateModelConfig->actvFunctions);
+            newModel->LearningRateOfBiases = federateModelConfig->learningRateOfBiases;
+            newModel->LearningRateOfWeights = federateModelConfig->learningRateOfWeights;
+        } else {
+            newModel = new NeuralNetwork(localModelConfig->layers, localModelConfig->numberOfLayers, localModelConfig->actvFunctions);
+            newModel->LearningRateOfBiases = localModelConfig->learningRateOfBiases;
+            newModel->LearningRateOfWeights = localModelConfig->learningRateOfWeights;
+        }
         
-        if (newModel->load(file)) {
+        bool loaded = newModel->load(file);
+        file.close();
+#endif
+        
+        if (loaded) {
             newModelState = ModelState_READY_TO_TRAIN;
             federateState = FederateState_TRAINING;
             unsubscribeFromResume = true;
@@ -1577,6 +1621,20 @@ void setupMQTT(bool resume) {
                 if (isMe) {
                     federateState = FederateState_DONE;
                     currentRound = -1;
+                    unsubscribeFromResume = true;
+                    if (newModel != NULL) {
+                        delete newModel;
+                        newModel = NULL;
+                    }
+                    if (tempModel != NULL) {
+                        delete tempModel;
+                        tempModel = NULL;
+                    }
+                    if (newModelMetrics != NULL) {
+                        delete newModelMetrics;
+                        newModelMetrics = NULL;
+                    }
+                    newModelState = ModelState_IDLE;
                     saveDeviceConfig();
                 }
                 if (isOther) {
@@ -1604,14 +1662,56 @@ void setupMQTT(bool resume) {
             } else if (strcmp(command, "federate_resume") == 0) {
                 if (isMe) {
                     D_println("Resuming training...");
-                    if (currentRound == 0) {
-                        if (currentRound > lastTrainedRound) {
-                            setupFederatedModel();
-                            D_println("Setup done");
-                        } else {
-                            D_println("Already trained for round " + String(currentRound) + ", waiting for next round.");
+                    
+                    // Parse configuration if provided by the server
+                    if (doc.containsKey("config") && doc["config"].is<JsonObject>()) {
+                        unsigned int* federateLayers = new unsigned int[doc["config"]["layers"].size()];
+                        for (int i = 0; i < doc["config"]["layers"].size(); i++) {
+                            federateLayers[i] = doc["config"]["layers"][i].as<unsigned int>();
+                        }
+                        byte* federateActvFunctions = new byte[doc["config"]["actvFunctions"].size()];
+                        for (int i = 0; i < doc["config"]["actvFunctions"].size(); i++) {
+                            federateActvFunctions[i] = doc["config"]["actvFunctions"][i].as<byte>();
+                        }
+                        
+                        if (federateModelConfig != NULL) {
+                            delete federateModelConfig;
+                        }
+                        
+                        federateModelConfig = new ModelConfig(federateLayers, doc["config"]["layers"].size(), federateActvFunctions);
+                        if (doc["randomSeed"].is<unsigned long>()) {
+                            federateModelConfig->randomSeed = doc["randomSeed"].as<unsigned long>();
+                            randomSeed(federateModelConfig->randomSeed);
+                        }
+                        if (doc["config"]["epochs"].is<unsigned int>()) {
+                            federateModelConfig->epochs = doc["config"]["epochs"].as<unsigned int>();
+                        }
+                        if (doc["config"]["learningRateOfWeights"].is<IDFLOAT>()) {
+                            federateModelConfig->learningRateOfWeights = doc["config"]["learningRateOfWeights"].as<IDFLOAT>();
+                        }
+                        if (doc["config"]["learningRateOfBiases"].is<IDFLOAT>()) {
+                            federateModelConfig->learningRateOfBiases = doc["config"]["learningRateOfBiases"].as<IDFLOAT>();
+                        }
+                        if (doc["config"]["jsonWeights"].is<bool>()) {
+                            federateModelConfig->jsonWeights = doc["config"]["jsonWeights"].as<bool>();
                         }
                     }
+                    
+                    if (doc.containsKey("round")) {
+                        currentRound = doc["round"].as<int>();
+                        lastTrainedRound = currentRound - 1; // force training for this round
+                    }
+                    
+                    federateState = FederateState_TRAINING;
+                    setupResume();
+                    setupFederatedModel();
+                    
+                    // Don't set newModelState to READY_TO_TRAIN yet (setupFederatedModel sets it, but we override it back)
+                    // because we must wait for the raw weights to arrive on raw resume topic.
+                    newModelState = ModelState_IDLE;
+                    saveDeviceConfig();
+                    
+                    D_println("Setup done for round " + String(currentRound));
                 }
                 // isOther? If other accepts resume, it means it should be training.
                 // But it's not running. 
@@ -1660,27 +1760,51 @@ void setupMQTT(bool resume) {
             return;
         }
         newModelState = ModelState_MODEL_BUSY;
-        File file = LittleFS.open(TEMPORARY_NEW_MODEL_PATH, "w+");
-        if (!file) {
-            D_println("Error opening file for writing");
-            return;
-        }
-        while (stream.available()) {
-            file.write(stream.read());
-        }
-        file.seek(0);
+        #if DIRECT_MQTT_STREAMING
+                if (federateState == FederateState_NONE) {
+                    newModel = new NeuralNetwork(localModelConfig->layers, localModelConfig->numberOfLayers, localModelConfig->actvFunctions);
+                    newModel->LearningRateOfBiases = localModelConfig->learningRateOfBiases;
+                    newModel->LearningRateOfWeights = localModelConfig->learningRateOfWeights;
+                } else {
+                    newModel = new NeuralNetwork(federateModelConfig->layers, federateModelConfig->numberOfLayers, federateModelConfig->actvFunctions);
+                    newModel->LearningRateOfBiases = federateModelConfig->learningRateOfBiases;
+                    newModel->LearningRateOfWeights = federateModelConfig->learningRateOfWeights;
+                }
 
-        if (federateState == FederateState_NONE) {
-            newModel = new NeuralNetwork(localModelConfig->layers, localModelConfig->numberOfLayers, localModelConfig->actvFunctions);
-            newModel->LearningRateOfBiases = localModelConfig->learningRateOfBiases;
-            newModel->LearningRateOfWeights = localModelConfig->learningRateOfWeights;
-        } else {
-            newModel = new NeuralNetwork(federateModelConfig->layers, federateModelConfig->numberOfLayers, federateModelConfig->actvFunctions);
-            newModel->LearningRateOfBiases = federateModelConfig->learningRateOfBiases;
-            newModel->LearningRateOfWeights = federateModelConfig->learningRateOfWeights;
-        }
+                bool loaded = loadModelFromStreamDirectly(newModel, stream);
+        #else
+                File file = LittleFS.open(TEMPORARY_NEW_MODEL_PATH, "w+");
+                if (!file) {
+                    D_println("Error opening file for writing");
+                    return;
+                }
 
-        if (newModel->load(file)) {
+                uint8_t buffer[1024];
+                while (stream.available()) {
+                    // readBytes returns the actual number of bytes read
+                    size_t bytesRead = stream.readBytes(buffer, sizeof(buffer));
+                    if (bytesRead > 0) {
+                        // Only write exactly the amount of bytes that were successfully read
+                        file.write(buffer, bytesRead);
+                    }
+                }
+                file.seek(0);
+
+                if (federateState == FederateState_NONE) {
+                    newModel = new NeuralNetwork(localModelConfig->layers, localModelConfig->numberOfLayers, localModelConfig->actvFunctions);
+                    newModel->LearningRateOfBiases = localModelConfig->learningRateOfBiases;
+                    newModel->LearningRateOfWeights = localModelConfig->learningRateOfWeights;
+                } else {
+                    newModel = new NeuralNetwork(federateModelConfig->layers, federateModelConfig->numberOfLayers, federateModelConfig->actvFunctions);
+                    newModel->LearningRateOfBiases = federateModelConfig->learningRateOfBiases;
+                    newModel->LearningRateOfWeights = federateModelConfig->learningRateOfWeights;
+                }
+
+                bool loaded = newModel->load(file);
+                file.close();
+        #endif
+
+                if (loaded) {
             D_println("Model loaded successfully from file");
             if (tempModel != NULL) {
                 delete tempModel;
@@ -1970,6 +2094,125 @@ void sendMessageToNetwork(FederateCommand command) {
 #endif
 }
 
+size_t calculateModelSize(NeuralNetwork& NN) {
+    size_t size = 0;
+#if defined(REDUCE_RAM_WEIGHTS_LVL2)
+    size += sizeof(unsigned int); // totalNumOfWeights
+#endif
+    size += sizeof(unsigned int); // numberOflayers
+    for (unsigned int n = 0; n < NN.numberOflayers; n++) {
+#if defined(ACTIVATION__PER_LAYER)
+        size += sizeof(byte);
+#endif
+        size += sizeof(unsigned int) * 2; // _numberOfInputs, _numberOfOutputs
+#if !defined(NO_BIAS) && !defined(MULTIPLE_BIASES_PER_LAYER)
+        size += sizeof(IDFLOAT);
+#endif
+        for (unsigned int i = 0; i < NN.layers[n]._numberOfOutputs; i++) {
+#if defined(MULTIPLE_BIASES_PER_LAYER)
+            size += sizeof(IDFLOAT);
+#endif
+            for (unsigned int j = 0; j < NN.layers[n]._numberOfInputs; j++) {
+                size += sizeof(IDFLOAT);
+            }
+        }
+    }
+    return size;
+}
+
+void streamModelToMQTT(NeuralNetwork& NN, PicoMQTT::Publisher::Publish& publish) {
+#if defined(REDUCE_RAM_WEIGHTS_LVL2)
+    unsigned int totalNumOfWeights = 0;
+    // Calculate total weights first since we can't seek back in a stream
+    for (unsigned int n = 0; n < NN.numberOflayers; n++) {
+        totalNumOfWeights += NN.layers[n]._numberOfOutputs * NN.layers[n]._numberOfInputs;
+    }
+    publish.write((const uint8_t*)&totalNumOfWeights, sizeof(unsigned int));
+    
+    // Reset counter for the actual writing loop to match library behavior
+    totalNumOfWeights = 0;
+#endif
+
+    publish.write((const uint8_t*)&NN.numberOflayers, sizeof(unsigned int));
+    
+    for (unsigned int n = 0; n < NN.numberOflayers; n++) {
+#if defined(ACTIVATION__PER_LAYER)
+        publish.write((const uint8_t*)&NN.ActFunctionPerLayer[n], sizeof(byte));
+#endif
+        publish.write((const uint8_t*)&NN.layers[n]._numberOfInputs, sizeof(unsigned int));
+        publish.write((const uint8_t*)&NN.layers[n]._numberOfOutputs, sizeof(unsigned int));
+        
+#if !defined(NO_BIAS) && !defined(MULTIPLE_BIASES_PER_LAYER)
+        publish.write((const uint8_t*)NN.layers[n].bias, sizeof(IDFLOAT));
+#endif
+
+        for (unsigned int i = 0; i < NN.layers[n]._numberOfOutputs; i++) {
+#if defined(MULTIPLE_BIASES_PER_LAYER)
+            publish.write((const uint8_t*)&NN.layers[n].bias[i], sizeof(IDFLOAT));
+#endif
+            for (unsigned int j = 0; j < NN.layers[n]._numberOfInputs; j++) {
+#if defined(REDUCE_RAM_WEIGHTS_LVL2)
+                publish.write((const uint8_t*)&NN.weights[totalNumOfWeights++], sizeof(IDFLOAT));
+#else
+                publish.write((const uint8_t*)&NN.layers[n].weights[i][j], sizeof(IDFLOAT));
+#endif
+            }
+        }
+    }
+}
+
+bool loadModelFromStreamDirectly(NeuralNetwork* NN, Stream& stream) {
+    if (NN == NULL) return false;
+
+#if defined(REDUCE_RAM_WEIGHTS_LVL2)
+    unsigned int totalNumOfWeights = 0;
+    if (stream.readBytes((uint8_t*)&totalNumOfWeights, sizeof(unsigned int)) != sizeof(unsigned int)) return false;
+    totalNumOfWeights = 0; // reset for iteration
+#endif
+
+    unsigned int numLayers;
+    if (stream.readBytes((uint8_t*)&numLayers, sizeof(unsigned int)) != sizeof(unsigned int)) return false;
+    
+    if (numLayers != NN->numberOflayers) {
+        D_println("Error: Stream layer count mismatch");
+        return false;
+    }
+
+    for (unsigned int n = 0; n < numLayers; n++) {
+#if defined(ACTIVATION__PER_LAYER)
+        byte actv;
+        if (stream.readBytes((uint8_t*)&actv, sizeof(byte)) != sizeof(byte)) return false;
+        NN->ActFunctionPerLayer[n] = actv;
+#endif
+        unsigned int inputs, outputs;
+        if (stream.readBytes((uint8_t*)&inputs, sizeof(unsigned int)) != sizeof(unsigned int)) return false;
+        if (stream.readBytes((uint8_t*)&outputs, sizeof(unsigned int)) != sizeof(unsigned int)) return false;
+        
+        if (inputs != NN->layers[n]._numberOfInputs || outputs != NN->layers[n]._numberOfOutputs) {
+            D_println("Error: Stream layer dimension mismatch");
+            return false;
+        }
+
+#if !defined(NO_BIAS) && !defined(MULTIPLE_BIASES_PER_LAYER)
+        if (stream.readBytes((uint8_t*)NN->layers[n].bias, sizeof(IDFLOAT)) != sizeof(IDFLOAT)) return false;
+#endif
+
+        for (unsigned int i = 0; i < outputs; i++) {
+#if defined(MULTIPLE_BIASES_PER_LAYER)
+            if (stream.readBytes((uint8_t*)&NN->layers[n].bias[i], sizeof(IDFLOAT)) != sizeof(IDFLOAT)) return false;
+#endif
+            for (unsigned int j = 0; j < inputs; j++) {
+#if defined(REDUCE_RAM_WEIGHTS_LVL2)
+                if (stream.readBytes((uint8_t*)&NN->weights[totalNumOfWeights++], sizeof(IDFLOAT)) != sizeof(IDFLOAT)) return false;
+#else
+                if (stream.readBytes((uint8_t*)&NN->layers[n].weights[i][j], sizeof(IDFLOAT)) != sizeof(IDFLOAT)) return false;
+#endif
+            }
+        }
+    }
+    return true;
+}
+
 void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics) {
     // ! PicoMQTT can only handle send one message at a time, so we do a semaphore to prevent other messages from being sent at the same time
     while (sendingMessage) delay(10);
@@ -2067,6 +2310,26 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
         }
     }
 
+#if DIRECT_MQTT_STREAMING
+    size_t modelSize = calculateModelSize(NN);
+
+    printMemory();
+    roundMemoryUsage.beforeSend = info.total_free_bytes;
+    roundMemoryUsage.minimumFree = info.minimum_free_bytes;
+
+    doc["memory"]["round"]["beforeSend"] = roundMemoryUsage.beforeSend;
+    doc["memory"]["round"]["minimumFree"] = roundMemoryUsage.minimumFree;
+        
+    String topic = String(MQTT_RAW_PUBLISH_TOPIC);
+    topic.concat("/");
+    topic.concat(CLIENT_NAME);
+    D_println("Model direct streaming size: " + String(modelSize) + " bytes");
+    D_println("Topic: " + topic);
+    
+    auto publish = mqtt.begin_publish(topic, modelSize, 1);
+    streamModelToMQTT(NN, publish);
+    publish.send();
+#else
     File modelFile = LittleFS.open(TEMPORARY_NEW_MODEL_PATH, "w");
     NN.save(modelFile);
     
@@ -2095,6 +2358,7 @@ void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics)
     publish.send();
     delete[] buffer;
     modelFile.close();
+#endif
 
     auto publish2 = mqtt.begin_publish(MQTT_PUBLISH_TOPIC, measureJson(doc), 1);
     serializeJson(doc, publish2);

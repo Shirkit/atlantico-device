@@ -44,6 +44,8 @@
 #define MQTT_RECEIVE_COMMANDS_TOPIC "esp32/fl/commands/pull"
 #define MQTT_SEND_COMMANDS_TOPIC "esp32/fl/commands/push"
 
+#define DIRECT_MQTT_STREAMING 1 // Set to 1 to bypass LittleFS and stream models directly to/from RAM
+
 // Other
 #define CONNECTION_TIMEOUT 30000 // in milliseconds
 

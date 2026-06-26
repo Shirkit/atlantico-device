@@ -2,6 +2,7 @@
 #define MODELUTIL_H_
 
 #include <NeuralNetwork.h>
+#include <PicoMQTT.h>
 
 #define SUPPORTS_SD_FUNCTIONALITY
 
@@ -359,6 +360,12 @@ bool isJulianaBinaryDataset(const String& meta_file);
 multiClassClassifierMetrics* trainModelFromBinaryDataset(NeuralNetwork& NN, ModelConfig& config, const String& bin_file, const String& meta_file);
 multiClassClassifierMetrics* trainModelFromJulianaBinaryDataset(NeuralNetwork& NN, ModelConfig& config, const String& bin_file, const String& meta_file);
 #endif
+
+size_t calculateModelSize(NeuralNetwork& NN);
+
+void streamModelToMQTT(NeuralNetwork& NN, PicoMQTT::Publisher::Publish& publish);
+
+bool loadModelFromStreamDirectly(NeuralNetwork* NN, Stream& stream);
 
 void sendModelToNetwork(NeuralNetwork& NN, multiClassClassifierMetrics& metrics);
 
